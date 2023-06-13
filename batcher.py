@@ -7,7 +7,7 @@ import torch
 import numpy as np
 import h5py
 import argparse
-from utils.reweight import reweight1d, reweight2d 
+#from utils.reweight import reweight1d, reweight2d 
 
 # Load data in agreed upon format
 def loadDataFromH5(
@@ -30,7 +30,7 @@ def loadDataFromH5(
         e = np.log(e)
         e[e==-np.inf] = 0
         # pt
-        pt = np.array(f['source']['pt'])
+        pt = np.array(f['source']['pt'])/1000. #Takane's inputs have the wrong units for pt and mass
         pt = np.log(pt)
         pt[pt==-np.inf] = 0
         # phi
@@ -107,14 +107,14 @@ def loadDataFromH5(
             bmask = (dsid>=364701) * (dsid<=364712) * event_selection
             bx,by,bv = target_mavg[bmask], ht[bmask], None #w[bmask]
             bins = [np.linspace(0,5000,1+50*2),np.linspace(1000,15000,1+150*2)]
-            if reweight == 1:
-                print("Doing 1D reweighting")
-                sw, bw = reweight1d(sx,bx,bins[0],sv,bv,True)
-                w[smask], w[bmask] = sw, bw
-            elif reweight == 2:
-                print("Doing 2D reweighting")
-                sw, bw = reweight2d(sx,sy,bx,by,bins,sv,bv,True)
-                w[smask], w[bmask] = sw, bw
+            #if reweight == 1:
+            #    print("Doing 1D reweighting")
+            #    sw, bw = reweight1d(sx,bx,bins[0],sv,bv,True)
+            #    w[smask], w[bmask] = sw, bw
+            #elif reweight == 2:
+            #    print("Doing 2D reweighting")
+            #    sw, bw = reweight2d(sx,sy,bx,by,bins,sv,bv,True)
+            #    w[smask], w[bmask] = sw, bw
             print("Signal weights min, max, mean, std: ", np.min(w[smask]),np.max(w[smask]),np.mean(w[smask]),np.std(w[smask]))
             print("Background weights min, max, mean, std: ", np.min(w[bmask]),np.max(w[bmask]),np.mean(w[bmask]),np.std(w[bmask]))
         Y = np.concatenate([Y,w.reshape(-1,1)],1)
@@ -181,7 +181,7 @@ if __name__ == "__main__":
         ops.inFile, 
         eventSelection=ops.event_selection, 
         loadWeights=False,
-        noLabels=False, 
+        noLabels=True, 
         truthSB=True, 
         teacher=ops.teacher, 
         split=[0.7,0.2,0.1], 
@@ -190,6 +190,6 @@ if __name__ == "__main__":
         minNjets=ops.minNjets,
         reweight=ops.reweight
     )
-    print(X.shape, Y.shape)
+    print(X.shape)
     #print([X[idx==i].shape for i in range(4)])
     #print(torch.where(torch.sum(X==0,(1,2)) == X.shape[1]*X.shape[2]))

@@ -46,11 +46,11 @@ if __name__ == "__main__":
     pin_memory = (device == "gpu")
 
     # load and split
-    X, Y, idx = loadDataFromH5(ops.inFile, loadWeights=False, noLabels=False, truthSB=True, **config["batcher"])
-    X_train, Y_train = X[idx==1], Y[idx==1]
-    X_val, Y_val = X[idx==2], Y[idx==2]
+    X, Y, idx = loadDataFromH5(ops.inFile, loadWeights=False, noLabels=True, truthSB=True, **config["batcher"])
+    X_train = X[idx==1]
+    X_val = X[idx==2]
     print(f"Number of events unused {(idx==0).sum()}, train {(idx==1).sum()}, validation {(idx==2).sum()}, test {(idx==3).sum()}")
-    print(f"X_train {X_train.shape}, Y_train {Y_train.shape}, X_val {X_val.shape}, Y_val {Y_val.shape}")
+    print(f"X_train {X_train.shape}, X_val {X_val.shape}")
     train_dataloader = DataLoader(TensorDataset(X_train, Y_train), shuffle=True, num_workers=4, pin_memory=pin_memory, batch_size=config["batch_size"])
     val_dataloader = DataLoader(TensorDataset(X_val, Y_val), shuffle=False, num_workers=4, pin_memory=pin_memory, batch_size=config["batch_size"])
     
