@@ -109,7 +109,7 @@ class AttnBlock(nn.Module):
 
 class Encoder(nn.Module):
 
-    def __init__(self, embed_input_dim, embed_nlayers, embed_dim, mlp_input_dim, mlp_nlayers, mlp_dim, attn_blocks_n, attn_block_num_heads, attn_block_ffwd_on, attn_block_ffwd_nlayers, attn_block_ffwd_dim, gumble_softmax_config, out_dim):
+    def __init__(self, embed_input_dim, embed_nlayers, embed_dim, mlp_input_dim, mlp_nlayers, mlp_dim, attn_blocks_n, attn_block_num_heads, attn_block_ffwd_on, attn_block_ffwd_nlayers, attn_block_ffwd_dim, gumble_softmax_config, out_dim, doWij, doCandidateAttention):
 
         super().__init__()
 
@@ -119,27 +119,31 @@ class Encoder(nn.Module):
         # embed, In -> Out : J,C -> J,E
         self.embed = Embed(embed_input_dim, embed_nlayers*[embed_dim], normalize_input=True)
 
-        # mlp
-        self.mlp = Embed(mlp_input_dim, mlp_nlayers*[mlp_dim], normalize_input=False, final_layer=[mlp_dim,1])
+        # position encoding based on (eta,cos(phi),sin(phi))
+        self.doWij = doWij
+        if self.doWij:
+            # MLP for Wij
+            self.mlp = Embed(mlp_input_dim, mlp_nlayers*[mlp_dim], normalize_input=False, final_layer=[mlp_dim,1])
 
         # object attention blocks, In -> Out : J,E -> J,E
         ffwd_dims = [[attn_block_ffwd_dim]*attn_block_ffwd_nlayers + [embed_dim]] * attn_blocks_n
         self.obj_blocks = nn.ModuleList([AttnBlock(embed_dim=embed_dim, num_heads=attn_block_num_heads, ffwd_dims=ffwd_dims[cfg]) for cfg in range(attn_blocks_n)])
         
-        # candidate attention blocks, In -> Out : T,E -> T,E
-        self.gumble_softmax_config = gumble_softmax_config
-        self.cand_blocks = nn.ModuleList([AttnBlock(embed_dim=embed_dim, num_heads=attn_block_num_heads, ffwd_dims=ffwd_dims[cfg]) for cfg in range(attn_blocks_n)])
+        # candidate attention blocks
+        self.doCandidateAttention = doCandidateAttention
+        if self.doCandidateAttention:
+
+            # candidate attention blocks, In -> Out : T,E -> T,E
+            self.gumble_softmax_config = gumble_softmax_config
+            self.cand_blocks = nn.ModuleList([AttnBlock(embed_dim=embed_dim, num_heads=attn_block_num_heads, ffwd_dims=ffwd_dims[cfg]) for cfg in range(attn_blocks_n)])
         
-        # cross attention blocks, In -> Out : J,E -> J,E
-        self.cross_blocks = nn.ModuleList([AttnBlock(embed_dim=embed_dim, num_heads=attn_block_num_heads, ffwd_dims=ffwd_dims[cfg]) for cfg in range(attn_blocks_n)])
+            # cross attention blocks, In -> Out : J,E -> J,E
+            self.cross_blocks = nn.ModuleList([AttnBlock(embed_dim=embed_dim, num_heads=attn_block_num_heads, ffwd_dims=ffwd_dims[cfg]) for cfg in range(attn_blocks_n)])
         
         # final head, In -> Out : J,E -> J,T
         self.final = Embed(embed_dim, embed_nlayers*[embed_dim], normalize_input=True, final_layer=[embed_dim,self.T])
 
-        # auxiliary losses
-        self.block_mass_loss = 0
-
-    def forward(self, x, w, mask, y=None, loss=None):
+    def forward(self, x, w, mask, loss=None):
 
         # embed and remask, In -> Out : J,C -> J,E
         x = self.embed(x)
@@ -152,60 +156,38 @@ class Encoder(nn.Module):
         for ib in range(len(self.obj_blocks)):
 
             # pairwise + MLP
-            if ib == 0:
-                wij = pairwise(w)
-                wij = self.mlp(wij)
-                wij = wij.squeeze(-1)
+            if self.doWij:
+                if ib == 0:
+                    wij = pairwise(w)
+                    wij = self.mlp(wij)
+                    wij = wij.squeeze(-1)
+                    wij = wij.repeat(self.obj_blocks[ib].attn.num_heads,1,1)
+            else:
+                wij = None
+                
 
             # apply attention and remask, In -> Out : J,C -> J,E
-            x = self.obj_blocks[ib](Q=x, K=x, V=x, key_padding_mask=mask.bool(), attn_mask=wij.repeat(self.obj_blocks[ib].attn.num_heads,1,1))
+            x = self.obj_blocks[ib](Q=x, K=x, V=x, key_padding_mask=mask.bool(), attn_mask=wij) #.repeat(self.obj_blocks[ib].attn.num_heads,1,1))
             x = x.masked_fill(mask.unsqueeze(-1).repeat(1,1,x.shape[-1]).bool(), 0)
 
             # candidate attention
-            if self.training:
-                # differential but relies on probability distribution
-                c = nn.functional.gumbel_softmax(x[:,:,:self.T], dim=2, **self.gumble_softmax_config) # J, T
-            else:
-                # not differential but justs max per row
-                c = nn.functional.one_hot(torch.argmax(x[:,:,:self.T],dim=-1), num_classes=self.T).float() # J, T
-            c = torch.bmm(c.transpose(2,1), x) # (T,J)x (J,E) -> T,E
-            c = self.cand_blocks[ib](Q=c, K=c, V=c, key_padding_mask=None, attn_mask=None) # T,E
-            
-            # cross attention, In -> Out : (J,E)x(E,T)x(T,E) -> J,E
-            x = self.cross_blocks[ib](Q=x, K=c, V=c, key_padding_mask=None, attn_mask=None) # J,E
-            x = x.masked_fill(mask.unsqueeze(-1).repeat(1,1,x.shape[-1]).bool(), 0)
+            if self.doCandidateAttention:
 
-            # compute auxiliary losses
-            if y is not None:
-                self.block_mass_loss += sum(loss(x[:,:,:self.T].transpose(2,1), y, mask).values())
+                if self.training:
+                    # differential but relies on probability distribution
+                    c = nn.functional.gumbel_softmax(x[:,:,:self.T], dim=2, **self.gumble_softmax_config) # J, T
+                else:
+                    # not differential but justs max per row
+                    c = nn.functional.one_hot(torch.argmax(x[:,:,:self.T],dim=-1), num_classes=self.T).float() # J, T
+                c = torch.bmm(c.transpose(2,1), x) # (T,J)x (J,E) -> T,E
+                c = self.cand_blocks[ib](Q=c, K=c, V=c, key_padding_mask=None, attn_mask=None) # T,E
+            
+                # cross attention, In -> Out : (J,E)x(E,T)x(T,E) -> J,E
+                x = self.cross_blocks[ib](Q=x, K=c, V=c, key_padding_mask=None, attn_mask=None) # J,E
+                x = x.masked_fill(mask.unsqueeze(-1).repeat(1,1,x.shape[-1]).bool(), 0)
         
         # final head J,E -> J,T
         x = self.final(x)
         x = x.masked_fill(mask.unsqueeze(-1).repeat(1,1,x.shape[-1]).bool(), 0)
 
-        # divide cumulative loss 
-        self.block_mass_loss /= len(self.obj_blocks)
-
         return x, w
-
-# if __name__ == "__main__":
-    
-#     # load data
-#     from batcher import loadDataFromH5
-#     x, y, _ = loadDataFromH5("/hdd01/abadea/analysis/rpvmj/dijetsProd5_GGrpvProd4/minHT1100_minJetPt50_minNjetsAbovePtCut50_minNJets6_maxNjets8/GG_rpv/user.abadea.504540.e8258_e7400_s3126_r10724_r10726_p5313.32583846._000001.trees.h5")
-#     x, y = x[:2], y[:2]
-#     w = torch.stack([x[:,:,1], x[:,:,2], x[:,:,3]],-1) # [eta, cos(phi), sin(phi)]
-#     mask = (x[:,:,0] == 0).bool()
-#     print(x.shape, w.shape, mask.shape, y.shape)
-    
-#     # make model
-#     import json
-#     with open("config.json", 'r') as fp:
-#         config = json.load(fp)
-#     model = Encoder(**config["encoder_config"])
-#     print(model)
-
-#     # evalute
-#     x, w = model(x, w, mask) #, y, self.mass_loss)
-#     print(x.shape)
-#     print(x)

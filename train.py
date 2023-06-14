@@ -2,6 +2,7 @@
 
 '''
 Author: Anthony Badea
+Date: November 16, 2022
 '''
 
 # python packages
@@ -46,23 +47,17 @@ if __name__ == "__main__":
     pin_memory = (device == "gpu")
 
     # load and split
-    X, Y, idx = loadDataFromH5(ops.inFile, loadWeights=False, noLabels=True, truthSB=True, **config["batcher"])
-    X_train = X[idx==1]
-    X_val = X[idx==2]
-    print(f"Number of events unused {(idx==0).sum()}, train {(idx==1).sum()}, validation {(idx==2).sum()}, test {(idx==3).sum()}")
+    X = loadDataFromH5(ops.inFile)
+    X_train, X_val = train_test_split(X, test_size = 0.25)
     print(f"X_train {X_train.shape}, X_val {X_val.shape}")
-    train_dataloader = DataLoader(TensorDataset(X_train, Y_train), shuffle=True, num_workers=4, pin_memory=pin_memory, batch_size=config["batch_size"])
-    val_dataloader = DataLoader(TensorDataset(X_val, Y_val), shuffle=False, num_workers=4, pin_memory=pin_memory, batch_size=config["batch_size"])
+    train_dataloader = DataLoader(X_train, shuffle=True, num_workers=4, pin_memory=pin_memory, batch_size=config["batch_size"]) # if multiple inputs beside just X then use DataLoader(TensorDataset(X, ...), ...)
+    val_dataloader = DataLoader(X_val, shuffle=False, num_workers=4, pin_memory=pin_memory, batch_size=config["batch_size"])
     
     # make checkpoint dir
     checkpoint_dir = os.path.join(ops.outDir, f'training_{datetime.datetime.now().strftime("%Y.%m.%d.%H.%M.%S")}')
     print(f"Saving checkpoints to: {checkpoint_dir}")
     if not os.path.isdir(checkpoint_dir):
         os.makedirs(checkpoint_dir)
-
-    # save event selection idx to file
-    with h5py.File(os.path.join(checkpoint_dir,"event_selection.h5"), "w") as f:
-        f.create_dataset("idx", data = idx)
 
     # create model
     model = StepLightning(**config["model"])
