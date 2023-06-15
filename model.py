@@ -33,8 +33,8 @@ class StepLightning(pl.LightningModule):
 
         # create padding mask with True where padded
         mask = (x[:,:,0] == 0).bool()
-        x, w = self.Encoder(x, w, mask)
-        return x, mask
+        cout, cin = self.Encoder(x, w, mask)
+        return cout, cin
         
     def step(self, batch, batch_idx, version):
         
@@ -46,10 +46,10 @@ class StepLightning(pl.LightningModule):
 
         # forward pass
         x = batch
-        y_hat, mask = self(x)
+        c1_out, c2_out, c1, c2 = self(x)
         
         # compute loss
-        loss = self.loss(y_hat, mask)
+        loss = self.loss(c1_out, c2_out, c1, c2)
 
         # log the loss
         for key, val in loss.items():
@@ -88,16 +88,16 @@ class StepLightning(pl.LightningModule):
         
         return -1
 
-    def loss(self, y_hat, mask):
+    def loss(self, c1_out, c2_out, c1, c2)
 
         ''' 
-        yhat = [B, NJets, NParent] 
-        mask = [B, NJets]
+        cout/cin = [B, E]
         '''
 
         # total loss
         l = {}
-        l["l0"] = torch.mean(y_hat**2) # dummy loss depending on the input
+        l["mse"]         = torch.mean((c1_out-c1)**2 + (c2_out-c2)**2)
+        l["mse_crossed"] = torch.mean((c1_out-c2)**2 + (c2_out-c1)**2)
 
         # get total
         l['loss'] = sum(l.values())
