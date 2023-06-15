@@ -18,6 +18,8 @@
         "hard": true
       },
       "doWij" : true,
+      "ae_dim" : 4,
+      "ae_depth" : 4,
       "doCandidateAttention" : true
     },
     "loss_config": {
@@ -41,7 +43,7 @@
     "teacher": false
   },
   "trainer": {
-    "precision": "16-mixed",
+    "precision": 32,
     "gradient_clip_val": 0.1
   },
   "batch_size": 2048
