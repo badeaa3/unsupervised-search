@@ -15,7 +15,6 @@
       "out_dim": 3,
       "gumble_softmax_config": {
         "tau": 1,
-        "annealing": true,
         "hard": false
       },
       "doWij" : true,
@@ -28,7 +27,8 @@
     },
     "weights": false,
     "lr": 0.001,
-    "update_learning_rate": true
+    "update_learning_rate": true,
+    "tau_annealing": true
   },
   "batcher": {
     "minCparam": 0,
