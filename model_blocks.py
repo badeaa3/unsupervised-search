@@ -197,6 +197,7 @@ class Encoder(nn.Module):
                 # not differential but justs max per row
                 cchoice = nn.functional.one_hot(torch.argmax(x[:,:,:self.T],dim=-1), num_classes=self.T).float() # J, T
             c = torch.bmm(cchoice.transpose(2,1), x) # (T,J)x (J,E) -> T,E
+            #FIXME should we enter the AE before or after the candidate self-attention?
             c = self.cand_blocks[ib](Q=c, K=c, V=c, key_padding_mask=None, attn_mask=None) # T,E
             
             if ib==len(self.obj_blocks)-1: #incomplete last block
@@ -213,7 +214,7 @@ class Encoder(nn.Module):
                 crandom = torch.bmm(randomchoice.transpose(2,1), x)
                 crandom = self.cand_blocks[ib](Q=c, K=c, V=c, key_padding_mask=None, attn_mask=None)
                 crandomp4 = torch.bmm(randomchoice.transpose(2,1), jp4)
-                crandommass = ms_from_p4s(cp4)
+                crandommass = ms_from_p4s(crandomp4)
             else:
                 # cross attention, In -> Out : (J,E)x(E,T)x(T,E) -> J,E
                 x = self.cross_blocks[ib](Q=x, K=c, V=c, key_padding_mask=None, attn_mask=None) # J,E
@@ -241,8 +242,16 @@ class Encoder(nn.Module):
         c2randommass    = crandommass[:,2]
         c2random_latent = self.ae_in(torch.cat([c2random,c2randommass[:,None]],-1))
         c2random_out    = self.ae_out(torch.cat([c2random_latent,c2randommass[:,None]],-1))
+        #inspect(c,cmass,crandom,crandommass, c1_out,c2_out,c1random_out,c2random_out, x, originalx, jp4, cp4, cchoice)
 
         return c1, c2, c1_out, c2_out, c1random_out, c2random_out
+
+def inspect(c,cmass,crandom,crandommass, c1_out,c2_out,c1random_out,c2random_out, x, originalx, jp4, cp4, cchoice):
+        print("Nans", torch.isnan(c).sum(), torch.isnan(cmass).sum(),torch.isnan(crandom).sum(),torch.isnan(crandommass).sum(),  torch.isnan(torch.stack([c1_out,c2_out,c1random_out,c2random_out])).sum())
+        print("Input", x[0], originalx[0], jp4[0])
+        print("Candidates", c[0], cchoice[0], cp4[0], cmass[0])
+        print("Random candidates", crandom[0], crandommass[0])
+        print("Candidates out", c1_out[0], c2_out[0], c1random_out[0], c2random_out[0])
 
 def x_to_p4(x):
     pt = torch.exp(x[..., 0])
