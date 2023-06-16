@@ -209,6 +209,7 @@ class Encoder(nn.Module):
                 #build random candidates
                 randomchoice = torch.from_numpy(np.zeros(cchoice.shape)).float().to("cuda:0")
                 randomindices = np.random.randint(self.T, size=randomchoice.shape[:-1])
+                randomindices[mask.cpu()] = 0
                 np.put_along_axis(randomchoice,randomindices[:,:,np.newaxis],True,axis=-1)
                 randomchoice = torch.tensor(randomchoice, requires_grad=False)
                 crandom = torch.bmm(randomchoice.transpose(2,1), x)
@@ -242,15 +243,15 @@ class Encoder(nn.Module):
         c2randommass    = crandommass[:,2]
         c2random_latent = self.ae_in(torch.cat([c2random,c2randommass[:,None]],-1))
         c2random_out    = self.ae_out(torch.cat([c2random_latent,c2randommass[:,None]],-1))
-        #inspect(c,cmass,crandom,crandommass, c1_out,c2_out,c1random_out,c2random_out, x, originalx, jp4, cp4, cchoice)
+        #inspect(c,cmass,crandom,crandommass, c1_out,c2_out,c1random_out,c2random_out, x, originalx, jp4, cp4, cchoice, randomchoice)
 
         return c1, c2, c1_out, c2_out, c1random_out, c2random_out
 
-def inspect(c,cmass,crandom,crandommass, c1_out,c2_out,c1random_out,c2random_out, x, originalx, jp4, cp4, cchoice):
+def inspect(c,cmass,crandom,crandommass, c1_out,c2_out,c1random_out,c2random_out, x, originalx, jp4, cp4, cchoice, randomchoice):
         print("Nans", torch.isnan(c).sum(), torch.isnan(cmass).sum(),torch.isnan(crandom).sum(),torch.isnan(crandommass).sum(),  torch.isnan(torch.stack([c1_out,c2_out,c1random_out,c2random_out])).sum())
         print("Input", x[0], originalx[0], jp4[0])
         print("Candidates", c[0], cchoice[0], cp4[0], cmass[0])
-        print("Random candidates", crandom[0], crandommass[0])
+        print("Random candidates", crandom[0], randomchoice[0], crandommass[0])
         print("Candidates out", c1_out[0], c2_out[0], c1random_out[0], c2random_out[0])
 
 def x_to_p4(x):

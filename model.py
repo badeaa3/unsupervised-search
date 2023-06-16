@@ -13,6 +13,7 @@ class StepLightning(pl.LightningModule):
         super().__init__()
 
         self.Encoder = model_blocks.Encoder(**encoder_config)
+        self.encoder_config = encoder_config
         self.loss_config = loss_config
         self.lr = lr
         self.update_learning_rate = update_learning_rate
@@ -41,6 +42,8 @@ class StepLightning(pl.LightningModule):
             self.learning_rate_scheduler()
         pg = self.trainer.optimizers[0].param_groups[0]
         self.log("lr", pg["lr"], prog_bar=True, on_step=True)
+
+        self.encoder_config["gumble_softmax_config"]["tau"] *= 1-1./self.trainer.max_steps #converges to 0.36
 
         # forward pass
         x = batch
