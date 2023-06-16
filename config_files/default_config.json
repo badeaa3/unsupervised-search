@@ -23,7 +23,7 @@
       "doCandidateAttention" : true
     },
     "loss_config": {
-      "scale_auxiliary_loss": 0.25
+      "scale_random_loss": 0.25
     },
     "weights": false,
     "lr": 0.001,
