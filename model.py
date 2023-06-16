@@ -43,7 +43,8 @@ class StepLightning(pl.LightningModule):
         pg = self.trainer.optimizers[0].param_groups[0]
         self.log("lr", pg["lr"], prog_bar=True, on_step=True)
 
-        self.encoder_config["gumble_softmax_config"]["tau"] *= 1-1./self.trainer.max_steps #converges to 0.36
+        if version == "train" and self.encoder_config["gumble_softmax_config"]["annealing"]:
+            self.encoder_config["gumble_softmax_config"]["tau"] *= 1-1./self.trainer.max_steps #converges to 0.36
 
         # forward pass
         x = batch

@@ -15,6 +15,7 @@
       "out_dim": 3,
       "gumble_softmax_config": {
         "tau": 1,
+        "annealing": true,
         "hard": false
       },
       "doWij" : true,
