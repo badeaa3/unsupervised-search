@@ -1,7 +1,5 @@
 import torch
-import torch.nn as nn
 import pytorch_lightning as pl
-import itertools
 import model_blocks 
 
 class StepLightning(pl.LightningModule):
@@ -33,8 +31,8 @@ class StepLightning(pl.LightningModule):
 
         # create padding mask with True where padded
         mask = (x[:,:,0] == 0).bool()
-        x, w = self.Encoder(x, w, mask)
-        return x, mask
+        c1, c2, c1_out, c2_out, c1random_out, c2random_out = self.Encoder(x, w, mask)
+        return c1, c2, c1_out, c2_out, c1random_out, c2random_out
         
     def step(self, batch, batch_idx, version):
         
@@ -46,19 +44,16 @@ class StepLightning(pl.LightningModule):
 
         # forward pass
         x = batch
-        y_hat, mask = self(x)
+        c1, c2, c1_out, c2_out, c1random_out, c2random_out = self(x)
         
         # compute loss
-        loss = self.loss(y_hat, mask)
+        loss = self.loss(c1, c2, c1_out, c2_out, c1random_out, c2random_out)
 
         # log the loss
         for key, val in loss.items():
             self.log(f"{version}_{key}", val, prog_bar=(key=="loss"), on_step=True)
         
-        # compute and log accuracy
-        acc = self.accuracy(y_hat) # update accuracy method
-        self.log(f"{version}_acc", acc, prog_bar=False, on_step=True)
-        print(loss["loss"])
+        #print(loss["loss"])
         return loss["loss"]
     
     def training_step(self, batch, batch_idx):
@@ -84,21 +79,20 @@ class StepLightning(pl.LightningModule):
             lr_scale = 0.95
             pg["lr"] = self.lr * (lr_scale**(self.trainer.global_step // N))
     
-    def accuracy(self, y_hat):
-        
-        return -1
-
-    def loss(self, y_hat, mask):
+    def loss(self, c1, c2, c1_out, c2_out, c1random_out, c2random_out):
 
         ''' 
-        yhat = [B, NJets, NParent] 
-        mask = [B, NJets]
+        cout/cin = [B, E]
         '''
 
         # total loss
         l = {}
-        l["l0"] = torch.mean(y_hat**2) # dummy loss depending on the input
+        l["mse"]         =  torch.mean((c1_out-c1)**2 + (c2_out-c2)**2)
+        l["mse_crossed"] =  torch.mean((c1_out-c2)**2 + (c2_out-c1)**2)
+        l["mse_random"]  = -torch.mean((c1random_out-c1)**2 + (c2random_out-c2)**2 + (c1random_out-c2)**2 + (c2random_out-c1)**2) #negative, maximize difference to random
+        l["mse_random"] *= self.loss_config["scale_random_loss"]
 
         # get total
         l['loss'] = sum(l.values())
+        #print(l)
         return l

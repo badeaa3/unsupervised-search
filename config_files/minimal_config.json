@@ -2,24 +2,24 @@
   "model": {
     "encoder_config": {
       "embed_input_dim": 5,
-      "embed_dim": 32,
+      "embed_dim": 8,
       "embed_nlayers": 3,
       "mlp_input_dim": 3,
-      "mlp_dim": 32,
+      "mlp_dim": 8,
       "mlp_nlayers": 3,
-      "attn_blocks_n": 4,
-      "attn_block_num_heads": 4,
+      "attn_blocks_n": 2,
+      "attn_block_num_heads": 2,
       "attn_block_ffwd_on": true,
       "attn_block_ffwd_nlayers": 3,
-      "attn_block_ffwd_dim": 32,
+      "attn_block_ffwd_dim": 8,
       "out_dim": 3,
       "gumble_softmax_config": {
         "tau": 1,
-        "hard": true
+        "hard": false
       },
       "doWij" : true,
       "ae_dim" : 4,
-      "ae_depth" : 4,
+      "ae_depth" : 3,
       "doCandidateAttention" : true
     },
     "loss_config": {
