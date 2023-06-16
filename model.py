@@ -53,7 +53,7 @@ class StepLightning(pl.LightningModule):
         for key, val in loss.items():
             self.log(f"{version}_{key}", val, prog_bar=(key=="loss"), on_step=True)
         
-        print(loss["loss"])
+        #print(loss["loss"])
         return loss["loss"]
     
     def training_step(self, batch, batch_idx):
@@ -94,5 +94,5 @@ class StepLightning(pl.LightningModule):
 
         # get total
         l['loss'] = sum(l.values())
-        print(l)
+        #print(l)
         return l

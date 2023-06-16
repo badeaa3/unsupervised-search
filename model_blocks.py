@@ -207,7 +207,7 @@ class Encoder(nn.Module):
                 cmass = ms_from_p4s(cp4) # T
 
                 #build random candidates
-                randomchoice = np.zeros_like(cchoice.detach().numpy())
+                randomchoice = torch.from_numpy(np.zeros(cchoice.shape)).float().to("cuda:0")
                 randomindices = np.random.randint(self.T, size=randomchoice.shape[:-1])
                 np.put_along_axis(randomchoice,randomindices[:,:,np.newaxis],True,axis=-1)
                 randomchoice = torch.tensor(randomchoice, requires_grad=False)
