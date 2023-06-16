@@ -17,6 +17,7 @@ class StepLightning(pl.LightningModule):
         self.encoder_config = encoder_config
         self.loss_config = loss_config
         self.lr = lr
+        self.update_learning_rate = update_learning_rate
         self.tau_annealing = tau_annealing
 
         # use the weights hyperparameters
