@@ -34,8 +34,8 @@ class StepLightning(pl.LightningModule):
 
         # create padding mask with True where padded
         mask = (x[:,:,0] == 0).bool()
-        c1, c2, c1_out, c2_out, c1random_out, c2random_out = self.Encoder(x, w, mask)
-        return c1, c2, c1_out, c2_out, c1random_out, c2random_out
+        ae_out, jet_choice = self.Encoder(x, w, mask)
+        return ae_out, jet_choice
         
     def step(self, batch, batch_idx, version):
         
@@ -47,10 +47,18 @@ class StepLightning(pl.LightningModule):
 
         if version == "train" and self.tau_annealing:
             self.encoder_config["gumble_softmax_config"]["tau"] *= 1-1./self.trainer.max_steps #converges to 0.36
+            self.log("tau", self.encoder_config["gumble_softmax_config"]["tau"], prog_bar=True, on_step=True)
 
         # forward pass
         x = batch
-        c1, c2, c1_out, c2_out, c1random_out, c2random_out = self(x)
+        (c1, c2, c1_out, c2_out, c1random_out, c2random_out), jet_choice = self(x)
+        hard_jet_choice = torch.argmax(jet_choice,dim=-1)
+        count_ISR = torch.mean(torch.sum(hard_jet_choice==0, -1).float())
+        count_g1  = torch.mean(torch.sum(hard_jet_choice==1, -1).float())
+        count_g2  = torch.mean(torch.sum(hard_jet_choice==2, -1).float())
+        self.log("count_ISR", count_ISR, on_step=True)
+        self.log("count_g1", count_g1, on_step=True)
+        self.log("count_g2", count_g2, on_step=True)
         
         # compute loss
         loss = self.loss(c1, c2, c1_out, c2_out, c1random_out, c2random_out)
@@ -66,6 +74,16 @@ class StepLightning(pl.LightningModule):
         return self.step(batch, batch_idx, "train")
 
     def validation_step(self, batch, batch_idx):
+        if batch_idx==0:
+            x = batch
+            (c1, c2, c1_out, c2_out, c1random_out, c2random_out), jet_choice = self(x)
+            print("validation step c1",c1[0])
+            print("validation step c2",c2[0])
+            print("validation step c1_out",c1_out[0])
+            print("validation step c2_out",c2_out[0])
+            print("validation step c1random_out",c1random_out[0])
+            print("validation step c2random_out",c2random_out[0])
+            print("validation step jet_choice",jet_choice[0])
         return self.step(batch,batch_idx, "val")
 
     def configure_optimizers(self):

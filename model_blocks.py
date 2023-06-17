@@ -161,8 +161,8 @@ class Encoder(nn.Module):
         
         # ends in a candidate attention block
         # final output is T,E
-        self.ae_in  = AE_block(embed_dim+1, ae_dim, ae_depth)
-        self.ae_out = AE_block(ae_dim+1, embed_dim, ae_depth)
+        self.ae_in  = AE_block(embed_dim-3+1, ae_dim, ae_depth)
+        self.ae_out = AE_block(ae_dim+1, embed_dim-3, ae_depth)
 
     def forward(self, x, w, mask, loss=None):
 
@@ -207,11 +207,36 @@ class Encoder(nn.Module):
                 cmass = ms_from_p4s(cp4) # T
 
                 #build random candidates
-                randomchoice = torch.from_numpy(np.zeros(cchoice.shape)).float().to("cuda:0")
-                randomindices = np.random.randint(self.T, size=randomchoice.shape[:-1])
-                randomindices[mask.cpu()] = 0
-                np.put_along_axis(randomchoice,randomindices[:,:,np.newaxis],True,axis=-1)
-                randomchoice = torch.tensor(randomchoice, requires_grad=False)
+                # mode A, sample 3 categories randomly
+                #randomchoice = torch.from_numpy(np.zeros(cchoice.shape)).float().to("cuda:0")
+                #randomindices = np.random.randint(self.T, size=randomchoice.shape[:-1])
+                #randomindices[mask.cpu()] = 0
+                #np.put_along_axis(randomchoice,randomindices[:,:,np.newaxis],True,axis=-1)
+                #randomchoice = torch.tensor(randomchoice, requires_grad=False)
+
+                # mode B, reshuffle the 6 leading predictions
+                #nbatch, njet = cchoice.shape[:2]
+                #cut = 6
+                #indices = torch.argsort(torch.rand((nbatch, cut)), dim=-1)
+                #indices = torch.cat([indices, torch.arange(cut,njet).repeat(nbatch,1)],-1).type(torch.int64).to("cuda:0")
+                #indices = indices[:,:,None].repeat(1,1,self.T)
+                #randomchoice = cchoice.clone().detach()
+                #randomchoice = torch.gather(randomchoice, dim=1, index=indices)
+
+                # mode C, resample category of gluino jets
+                #hard_choice = nn.functional.one_hot(torch.argmax(x[:,:,:self.T],dim=-1), num_classes=self.T).cpu()
+                #randomchoice = np.zeros(cchoice.shape)
+                #randomindices = np.random.randint(1,self.T, size=hard_choice.shape[:-1])
+                #randomindices[hard_choice[:,:,0]==1] = 0
+                #np.put_along_axis(randomchoice,randomindices[:,:,np.newaxis],True,axis=-1)
+                #randomchoice = torch.tensor(randomchoice, requires_grad=False).float().to("cuda:0")
+
+                # mode C, resample category of gluino jets
+                randomchoice = np.zeros(cchoice.shape)
+                randomchoice[:,:,1] = 1
+                randomchoice[mask.cpu()] = 0
+                randomchoice = torch.tensor(randomchoice, requires_grad=False).float().to("cuda:0")
+
                 crandom = torch.bmm(randomchoice.transpose(2,1), x)
                 crandom = self.cand_blocks[ib](Q=c, K=c, V=c, key_padding_mask=None, attn_mask=None)
                 crandomp4 = torch.bmm(randomchoice.transpose(2,1), jp4)
@@ -222,6 +247,9 @@ class Encoder(nn.Module):
                 x = x.masked_fill(mask.unsqueeze(-1).repeat(1,1,x.shape[-1]).bool(), 0)
 
         #autoencoders
+        c = c[:,:,self.T:] #drop the category scores
+        crandom = crandom[:,:,self.T:] #drop the category scores
+
         cISR = c[:,0]
 
         c1        = c[:,1]
@@ -245,7 +273,7 @@ class Encoder(nn.Module):
         c2random_out    = self.ae_out(torch.cat([c2random_latent,c2randommass[:,None]],-1))
         #inspect(c,cmass,crandom,crandommass, c1_out,c2_out,c1random_out,c2random_out, x, originalx, jp4, cp4, cchoice, randomchoice)
 
-        return c1, c2, c1_out, c2_out, c1random_out, c2random_out
+        return (c1, c2, c1_out, c2_out, c1random_out, c2random_out), cchoice
 
 def inspect(c,cmass,crandom,crandommass, c1_out,c2_out,c1random_out,c2random_out, x, originalx, jp4, cp4, cchoice, randomchoice):
         print("Nans", torch.isnan(c).sum(), torch.isnan(cmass).sum(),torch.isnan(crandom).sum(),torch.isnan(crandommass).sum(),  torch.isnan(torch.stack([c1_out,c2_out,c1random_out,c2random_out])).sum())

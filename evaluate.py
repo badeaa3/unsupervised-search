@@ -13,6 +13,7 @@ import h5py
 import json
 import glob
 from tqdm import tqdm 
+from model_blocks import x_to_p4
 
 # multiprocessing
 import torch.multiprocessing as mp
@@ -34,13 +35,13 @@ def evaluate(config):
     print(f"evaluating on {config['inFileName']}")
 
     # load model
-    model = StepLightning(config["encoder_config"], weights = ops.weights)
+    model = StepLightning(config["model"]["encoder_config"], weights = ops.weights)
     model.to(config["device"])
     model.eval()
     model.Encoder.eval()
 
     # load data
-    x, y, _ = loadDataFromH5(config["inFileName"], eventSelection=ops.event_selection, loadWeights=False, noLabels=ops.noTruthLabels, truthSB=False)
+    x = loadDataFromH5(config["inFileName"])
     mask = (x[:,:,0] == 0)
     
     # evaluate
@@ -54,17 +55,15 @@ def evaluate(config):
             start, end = i*ops.batch_size, (i+1)*ops.batch_size
             # be careful about the memory transfers to not use all gpu memory
             temp = x[start:end].to(config["device"])
-            pi, _ = model(temp)
-            pi, _ = pi.cpu(), _.cpu()
-            p.append(pi)
+            ae, jet_choice = model(temp)
+            jet_choice = jet_choice.cpu()
+            p.append(jet_choice)
 
         # concat
         p = torch.concat(p)
         
         # convert x
-        pt, eta, cphi, sphi, e = np.exp(x[:,:,0]), x[:,:,1], x[:,:,2], x[:,:,3], np.exp(x[:,:,4])
-        px, py, pz = pt*cphi, pt*sphi, pt*np.sinh(eta)
-        x = torch.Tensor(np.stack([e,px,py,pz],-1))
+        x = x_to_p4(x)
         # apply mask to x
         x = x.masked_fill(mask.unsqueeze(-1).repeat(1,1,x.shape[-1]).bool(), 0)
         pmom_max, pidx_max = get_mass_max(x, p)
@@ -73,6 +72,7 @@ def evaluate(config):
         # make output
         outData = {
             "pred": p.numpy(), # raw prediction
+            "jet_p4": x.numpy(), # raw jets
             "pred_jet_assignments_max" : pidx_max.numpy(), # interpreted prediction to jet assignments with max per jet
             "pred_ptetaphim_max" : pmom_max.cpu().numpy(), # predicted 4-mom (pt,eta,phi,m)
             "pred_jet_assignments_set" : pidx_set.numpy(), # interpreted prediction to jet assignments with set number of jets per parent

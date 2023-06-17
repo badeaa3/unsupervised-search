@@ -17,6 +17,7 @@ def loadDataFromH5(
         # energy
         e = np.array(f['source']['e'])
         e = np.nan_to_num(e)
+        njet = np.sum(e>0,-1)
         e = np.log(e)
         e[e==-np.inf] = 0
         # pt
@@ -30,6 +31,7 @@ def loadDataFromH5(
         eta = np.array(f['source']['eta'])
         # stack
         X = np.stack([pt,eta,np.cos(phi),np.sin(phi),e],-1)
+        X = X[njet >=6]
         X = torch.Tensor(X)
         
     if len(np.where(X!=X)[0]) > 0:
