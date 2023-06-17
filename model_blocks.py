@@ -162,7 +162,7 @@ class Encoder(nn.Module):
         # ends in a candidate attention block
         # final output is T,E
         self.ae_in  = AE_block(embed_dim-3+1, ae_dim, ae_depth)
-        self.ae_out = AE_block(ae_dim+1, embed_dim-3, ae_depth)
+        self.ae_out = AE_block(ae_dim, embed_dim-3+1, ae_depth)
 
     def forward(self, x, w, mask, loss=None):
 
@@ -208,11 +208,11 @@ class Encoder(nn.Module):
 
                 #build random candidates
                 # mode A, sample 3 categories randomly
-                #randomchoice = torch.from_numpy(np.zeros(cchoice.shape)).float().to("cuda:0")
-                #randomindices = np.random.randint(self.T, size=randomchoice.shape[:-1])
-                #randomindices[mask.cpu()] = 0
-                #np.put_along_axis(randomchoice,randomindices[:,:,np.newaxis],True,axis=-1)
-                #randomchoice = torch.tensor(randomchoice, requires_grad=False)
+                randomchoice = torch.from_numpy(np.zeros(cchoice.shape)).float().to("cuda:0")
+                randomindices = np.random.randint(self.T, size=randomchoice.shape[:-1])
+                randomindices[mask.cpu()] = 0
+                np.put_along_axis(randomchoice,randomindices[:,:,np.newaxis],True,axis=-1)
+                randomchoice = torch.tensor(randomchoice, requires_grad=False)
 
                 # mode B, reshuffle the 6 leading predictions
                 #nbatch, njet = cchoice.shape[:2]
@@ -231,11 +231,11 @@ class Encoder(nn.Module):
                 #np.put_along_axis(randomchoice,randomindices[:,:,np.newaxis],True,axis=-1)
                 #randomchoice = torch.tensor(randomchoice, requires_grad=False).float().to("cuda:0")
 
-                # mode C, resample category of gluino jets
-                randomchoice = np.zeros(cchoice.shape)
-                randomchoice[:,:,1] = 1
-                randomchoice[mask.cpu()] = 0
-                randomchoice = torch.tensor(randomchoice, requires_grad=False).float().to("cuda:0")
+                # mode D, all jets to gluino 1
+                #randomchoice = np.zeros(cchoice.shape)
+                #randomchoice[:,:,1] = 1
+                #randomchoice[mask.cpu()] = 0
+                #randomchoice = torch.tensor(randomchoice, requires_grad=False).float().to("cuda:0")
 
                 crandom = torch.bmm(randomchoice.transpose(2,1), x)
                 crandom = self.cand_blocks[ib](Q=c, K=c, V=c, key_padding_mask=None, attn_mask=None)
@@ -247,33 +247,31 @@ class Encoder(nn.Module):
                 x = x.masked_fill(mask.unsqueeze(-1).repeat(1,1,x.shape[-1]).bool(), 0)
 
         #autoencoders
-        c = c[:,:,self.T:] #drop the category scores
-        crandom = crandom[:,:,self.T:] #drop the category scores
+        cmass       /= 100.
+        crandommass /= 100.
+        c       = torch.cat([c[:,:,self.T:],cmass[:,:,None]],-1) #drop the category scores, add the mass
+        crandom = torch.cat([crandom[:,:,self.T:],crandommass[:,:,None]],-1) #drop the category scores, add the mass
 
         cISR = c[:,0]
 
         c1        = c[:,1]
-        c1mass    = cmass[:,1]
-        c1_latent = self.ae_in(torch.cat([c1,c1mass[:,None]],-1))
-        c1_out    = self.ae_out(torch.cat([c1_latent,c1mass[:,None]],-1))
+        c1_latent = self.ae_in(c1)
+        c1_out    = self.ae_out(c1_latent)
 
         c2        = c[:,2]
-        c2mass    = cmass[:,2]
-        c2_latent = self.ae_in(torch.cat([c2,c2mass[:,None]],-1))
-        c2_out    = self.ae_out(torch.cat([c2_latent,c2mass[:,None]],-1))
+        c2_latent = self.ae_in(c2)
+        c2_out    = self.ae_out(c2_latent)
 
         c1random        = crandom[:,1]
-        c1randommass    = crandommass[:,1]
-        c1random_latent = self.ae_in(torch.cat([c1random,c1randommass[:,None]],-1))
-        c1random_out    = self.ae_out(torch.cat([c1random_latent,c1randommass[:,None]],-1))
+        c1random_latent = self.ae_in(c1random)
+        c1random_out    = self.ae_out(c1random_latent)
 
         c2random        = crandom[:,2]
-        c2randommass    = crandommass[:,2]
-        c2random_latent = self.ae_in(torch.cat([c2random,c2randommass[:,None]],-1))
-        c2random_out    = self.ae_out(torch.cat([c2random_latent,c2randommass[:,None]],-1))
+        c2random_latent = self.ae_in(c2random)
+        c2random_out    = self.ae_out(c2random_latent)
         #inspect(c,cmass,crandom,crandommass, c1_out,c2_out,c1random_out,c2random_out, x, originalx, jp4, cp4, cchoice, randomchoice)
 
-        return (c1, c2, c1_out, c2_out, c1random_out, c2random_out), cchoice
+        return (c1, c2, c1_out, c2_out, c1random, c2random, c1random_out, c2random_out, cp4[:,0,0]/100), cchoice
 
 def inspect(c,cmass,crandom,crandommass, c1_out,c2_out,c1random_out,c2random_out, x, originalx, jp4, cp4, cchoice, randomchoice):
         print("Nans", torch.isnan(c).sum(), torch.isnan(cmass).sum(),torch.isnan(crandom).sum(),torch.isnan(crandommass).sum(),  torch.isnan(torch.stack([c1_out,c2_out,c1random_out,c2random_out])).sum())
@@ -295,6 +293,13 @@ def x_to_p4(x):
     return torch.stack([e,px,py,pz], -1)
     
 def ms_from_p4s(p4s):
+
     ''' copied from energyflow '''
-    m2s = p4s[...,0]**2 - p4s[...,1]**2 - p4s[...,2]**2 - p4s[...,3]**2
+    eps = 0.0001
+    m2s = (p4s[...,0]*(1+eps))**2 - p4s[...,1]**2 - p4s[...,2]**2 - p4s[...,3]**2
+    mask = (m2s < 0)
+    if torch.sum(mask)>0:
+      print(m2s[mask],p4s[mask])
+      sys.exit(1)
+    #return torch.sqrt(m2s)
     return torch.sign(m2s)*torch.sqrt(torch.abs(m2s))

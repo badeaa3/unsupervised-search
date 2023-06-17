@@ -51,7 +51,7 @@ class StepLightning(pl.LightningModule):
 
         # forward pass
         x = batch
-        (c1, c2, c1_out, c2_out, c1random_out, c2random_out), jet_choice = self(x)
+        (c1, c2, c1_out, c2_out, c1random, c2random, c1random_out, c2random_out, c0mass), jet_choice = self(x)
         hard_jet_choice = torch.argmax(jet_choice,dim=-1)
         count_ISR = torch.mean(torch.sum(hard_jet_choice==0, -1).float())
         count_g1  = torch.mean(torch.sum(hard_jet_choice==1, -1).float())
@@ -59,9 +59,17 @@ class StepLightning(pl.LightningModule):
         self.log("count_ISR", count_ISR, on_step=True)
         self.log("count_g1", count_g1, on_step=True)
         self.log("count_g2", count_g2, on_step=True)
+        mass1_in = torch.mean(c1[:,-1])
+        mass2_in = torch.mean(c2[:,-1])
+        mass1_out = torch.mean(c1_out[:,-1])
+        mass2_out = torch.mean(c2_out[:,-1])
+        self.log("mass1_in", mass1_in, on_step=True)
+        self.log("mass2_in", mass2_in, on_step=True)
+        self.log("mass1_out", mass1_out, on_step=True)
+        self.log("mass2_out", mass2_out, on_step=True)
         
         # compute loss
-        loss = self.loss(c1, c2, c1_out, c2_out, c1random_out, c2random_out)
+        loss = self.loss(c1, c2, c1_out, c2_out, c1random, c2random, c1random_out, c2random_out, c0mass)
 
         # log the loss
         for key, val in loss.items():
@@ -76,11 +84,13 @@ class StepLightning(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         if batch_idx==0:
             x = batch
-            (c1, c2, c1_out, c2_out, c1random_out, c2random_out), jet_choice = self(x)
+            (c1, c2, c1_out, c2_out, c1random, c2random, c1random_out, c2random_out, c0mass), jet_choice = self(x)
             print("validation step c1",c1[0])
             print("validation step c2",c2[0])
             print("validation step c1_out",c1_out[0])
             print("validation step c2_out",c2_out[0])
+            print("validation step c1random",c1random[0])
+            print("validation step c2random",c2random[0])
             print("validation step c1random_out",c1random_out[0])
             print("validation step c2random_out",c2random_out[0])
             print("validation step jet_choice",jet_choice[0])
@@ -103,7 +113,7 @@ class StepLightning(pl.LightningModule):
             lr_scale = 0.95
             pg["lr"] = self.lr * (lr_scale**(self.trainer.global_step // N))
     
-    def loss(self, c1, c2, c1_out, c2_out, c1random_out, c2random_out):
+    def loss(self, c1, c2, c1_out, c2_out, c1random, c2random, c1random_out, c2random_out, c0mass):
 
         ''' 
         cout/cin = [B, E]
@@ -113,8 +123,10 @@ class StepLightning(pl.LightningModule):
         l = {}
         l["mse"]         =  torch.mean((c1_out-c1)**2 + (c2_out-c2)**2)
         l["mse_crossed"] =  torch.mean((c1_out-c2)**2 + (c2_out-c1)**2)
-        l["mse_random"]  = -torch.mean((c1random_out-c1)**2 + (c2random_out-c2)**2 + (c1random_out-c2)**2 + (c2random_out-c1)**2) #negative, maximize difference to random
-        l["mse_random"] *= self.loss_config["scale_random_loss"]
+        l["mse_c0mass"] =  torch.mean(c0mass)
+        l["mse_random"]  =  torch.mean((c1random_out-c1random)**2 + (c2random_out-c2random)**2)
+        l["mse_negative"]  = -torch.mean((c1random_out-c1)**2 + (c2random_out-c2)**2 + (c1random_out-c2)**2 + (c2random_out-c1)**2) #negative, maximize difference to random
+        l["mse_negative"] *= self.loss_config["scale_random_loss"]
 
         # get total
         l['loss'] = sum(l.values())

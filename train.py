@@ -82,7 +82,8 @@ if __name__ == "__main__":
     )
     
     # fit
-    trainer.fit(model, train_dataloader, val_dataloader)
+    with torch.autograd.set_detect_anomaly(True):
+        trainer.fit(model, train_dataloader, val_dataloader)
     
     # save model
     trainer.save_checkpoint(os.path.join(checkpoint_dir,"finalWeights.ckpt"))
