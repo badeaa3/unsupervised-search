@@ -132,7 +132,7 @@ class AE_block(nn.Module):
 
 class Encoder(nn.Module):
 
-    def __init__(self, embed_input_dim, embed_nlayers, embed_dim, mlp_input_dim, mlp_nlayers, mlp_dim, attn_blocks_n, attn_block_num_heads, attn_block_ffwd_on, attn_block_ffwd_nlayers, attn_block_ffwd_dim, gumble_softmax_config, out_dim, doWij, doCandidateAttention, ae_dim, ae_depth):
+    def __init__(self, embed_input_dim, embed_nlayers, embed_dim, mlp_input_dim, mlp_nlayers, mlp_dim, attn_blocks_n, attn_block_num_heads, attn_block_ffwd_on, attn_block_ffwd_nlayers, attn_block_ffwd_dim, gumble_softmax_config, out_dim, doWij, doCandidateAttention, ae_dim, ae_depth, random_mode):
 
         super().__init__()
 
@@ -163,6 +163,7 @@ class Encoder(nn.Module):
         # final output is T,E
         self.ae_in  = AE_block(embed_dim-3+1, ae_dim, ae_depth)
         self.ae_out = AE_block(ae_dim, embed_dim-3+1, ae_depth)
+        self.random_mode = random_mode
 
     def forward(self, x, w, mask, loss=None):
 
@@ -190,61 +191,27 @@ class Encoder(nn.Module):
             x = x.masked_fill(mask.unsqueeze(-1).repeat(1,1,x.shape[-1]).bool(), 0)
 
             # candidate attention
-            if self.training:
-                # differential but relies on probability distribution
-                cchoice = nn.functional.gumbel_softmax(x[:,:,:self.T], dim=2, **self.gumble_softmax_config) # J, T
-            else:
-                # not differential but justs max per row
-                cchoice = nn.functional.one_hot(torch.argmax(x[:,:,:self.T],dim=-1), num_classes=self.T).float() # J, T
+            cchoice  = self.get_jet_choice(x)
             c = torch.bmm(cchoice.transpose(2,1), x) # (T,J)x (J,E) -> T,E
-            #FIXME should we enter the AE before or after the candidate self-attention?
             c = self.cand_blocks[ib](Q=c, K=c, V=c, key_padding_mask=None, attn_mask=None) # T,E
+
+            # cross attention, In -> Out : (J,E)x(E,T)x(T,E) -> J,E
+            x = self.cross_blocks[ib](Q=x, K=c, V=c, key_padding_mask=None, attn_mask=None) # J,E
+            x = x.masked_fill(mask.unsqueeze(-1).repeat(1,1,x.shape[-1]).bool(), 0)
+	#end for
             
-            if ib==len(self.obj_blocks)-1: #incomplete last block
-                #build candidate mass from original jet 4-vector
-                jp4 = x_to_p4(originalx) # J, 4
-                cp4 = torch.bmm(cchoice.transpose(2,1), jp4) # (T,J)x (J,4) -> T,4
-                cmass = ms_from_p4s(cp4) # T
+        #build candidate mass from original jet 4-vector
+        jp4 = x_to_p4(originalx)
+        cchoice  = self.get_jet_choice(x, debug=False)
+        cp4 = torch.bmm(cchoice.transpose(2,1), jp4)
+        cmass = ms_from_p4s(cp4)
 
-                #build random candidates
-                # mode A, sample 3 categories randomly
-                randomchoice = torch.from_numpy(np.zeros(cchoice.shape)).float().to("cuda:0")
-                randomindices = np.random.randint(self.T, size=randomchoice.shape[:-1])
-                randomindices[mask.cpu()] = 0
-                np.put_along_axis(randomchoice,randomindices[:,:,np.newaxis],True,axis=-1)
-                randomchoice = torch.tensor(randomchoice, requires_grad=False)
-
-                # mode B, reshuffle the 6 leading predictions
-                #nbatch, njet = cchoice.shape[:2]
-                #cut = 6
-                #indices = torch.argsort(torch.rand((nbatch, cut)), dim=-1)
-                #indices = torch.cat([indices, torch.arange(cut,njet).repeat(nbatch,1)],-1).type(torch.int64).to("cuda:0")
-                #indices = indices[:,:,None].repeat(1,1,self.T)
-                #randomchoice = cchoice.clone().detach()
-                #randomchoice = torch.gather(randomchoice, dim=1, index=indices)
-
-                # mode C, resample category of gluino jets
-                #hard_choice = nn.functional.one_hot(torch.argmax(x[:,:,:self.T],dim=-1), num_classes=self.T).cpu()
-                #randomchoice = np.zeros(cchoice.shape)
-                #randomindices = np.random.randint(1,self.T, size=hard_choice.shape[:-1])
-                #randomindices[hard_choice[:,:,0]==1] = 0
-                #np.put_along_axis(randomchoice,randomindices[:,:,np.newaxis],True,axis=-1)
-                #randomchoice = torch.tensor(randomchoice, requires_grad=False).float().to("cuda:0")
-
-                # mode D, all jets to gluino 1
-                #randomchoice = np.zeros(cchoice.shape)
-                #randomchoice[:,:,1] = 1
-                #randomchoice[mask.cpu()] = 0
-                #randomchoice = torch.tensor(randomchoice, requires_grad=False).float().to("cuda:0")
-
-                crandom = torch.bmm(randomchoice.transpose(2,1), x)
-                crandom = self.cand_blocks[ib](Q=c, K=c, V=c, key_padding_mask=None, attn_mask=None)
-                crandomp4 = torch.bmm(randomchoice.transpose(2,1), jp4)
-                crandommass = ms_from_p4s(crandomp4)
-            else:
-                # cross attention, In -> Out : (J,E)x(E,T)x(T,E) -> J,E
-                x = self.cross_blocks[ib](Q=x, K=c, V=c, key_padding_mask=None, attn_mask=None) # J,E
-                x = x.masked_fill(mask.unsqueeze(-1).repeat(1,1,x.shape[-1]).bool(), 0)
+        #build random candidates
+        randomchoice = self.get_random_choice(cchoice, mask)
+        crandom = torch.bmm(randomchoice.transpose(2,1), x)
+        crandom = self.cand_blocks[ib](Q=c, K=c, V=c, key_padding_mask=None, attn_mask=None)
+        crandomp4 = torch.bmm(randomchoice.transpose(2,1), jp4)
+        crandommass = ms_from_p4s(crandomp4)
 
         #autoencoders
         cmass       /= 100.
@@ -271,7 +238,51 @@ class Encoder(nn.Module):
         c2random_out    = self.ae_out(c2random_latent)
         #inspect(c,cmass,crandom,crandommass, c1_out,c2_out,c1random_out,c2random_out, x, originalx, jp4, cp4, cchoice, randomchoice)
 
-        return (c1, c2, c1_out, c2_out, c1random, c2random, c1random_out, c2random_out, cp4[:,0,0]/100), cchoice
+        return (c1, c2, c1_out, c2_out, c1random, c2random, c1random_out, c2random_out, cp4[:,0,0]), cchoice, x[:,:,:self.T]
+
+    def get_jet_choice(self,x, debug=False):
+        if self.training:
+            # differential but relies on probability distribution
+            cchoice = nn.functional.gumbel_softmax(x[:,:,:self.T], dim=2, **self.gumble_softmax_config) # J, T
+        else:
+            # not differential but justs max per row
+            if debug:
+                print(x[:,:,:self.T])
+                print(torch.argmax(x[:,:,:self.T]))
+                print(nn.functional.one_hot(torch.argmax(x[:,:,:self.T],dim=-1), num_classes=self.T))
+            cchoice = nn.functional.one_hot(torch.argmax(x[:,:,:self.T],dim=-1), num_classes=self.T).float() # J, T
+        return cchoice
+    
+    def get_random_choice(self, cchoice, mask):
+        if self.random_mode == "A": # sample 3 categories randomly
+            randomchoice = torch.from_numpy(np.zeros(cchoice.shape)).float().to("cuda:0")
+            randomindices = np.random.randint(self.T, size=randomchoice.shape[:-1])
+            randomindices[mask.cpu()] = 0
+            np.put_along_axis(randomchoice,randomindices[:,:,np.newaxis],True,axis=-1)
+            randomchoice = torch.tensor(randomchoice, requires_grad=False)
+        elif self.random_mode == "B": # reshuffle the 6 leading predictions
+            nbatch, njet = cchoice.shape[:2]
+            cut = 6
+            indices = torch.argsort(torch.rand((nbatch, cut)), dim=-1)
+            indices = torch.cat([indices, torch.arange(cut,njet).repeat(nbatch,1)],-1).type(torch.int64).to("cuda:0")
+            indices = indices[:,:,None].repeat(1,1,self.T)
+            randomchoice = cchoice.clone().detach()
+            randomchoice = torch.gather(randomchoice, dim=1, index=indices)
+        elif self.random_mode == "C": # resample category of gluino jets
+            hard_choice = nn.functional.one_hot(torch.argmax(x[:,:,:self.T],dim=-1), num_classes=self.T).cpu()
+            randomchoice = np.zeros(cchoice.shape)
+            randomindices = np.random.randint(1,self.T, size=hard_choice.shape[:-1])
+            randomindices[hard_choice[:,:,0]==1] = 0
+            np.put_along_axis(randomchoice,randomindices[:,:,np.newaxis],True,axis=-1)
+            randomchoice = torch.tensor(randomchoice, requires_grad=False).float().to("cuda:0")
+        elif self.random_mode == "D": # all jets to gluino 1
+            randomchoice = np.zeros(cchoice.shape)
+            randomchoice[:,:,1] = 1
+            randomchoice[mask.cpu()] = 0
+            randomchoice = torch.tensor(randomchoice, requires_grad=False).float().to("cuda:0")
+        else:
+            raise RunTimeError(f"Random mode {mode} not known")
+        return randomchoice
 
 def inspect(c,cmass,crandom,crandommass, c1_out,c2_out,c1random_out,c2random_out, x, originalx, jp4, cp4, cchoice, randomchoice):
         print("Nans", torch.isnan(c).sum(), torch.isnan(cmass).sum(),torch.isnan(crandom).sum(),torch.isnan(crandommass).sum(),  torch.isnan(torch.stack([c1_out,c2_out,c1random_out,c2random_out])).sum())
@@ -296,7 +307,7 @@ def ms_from_p4s(p4s):
 
     ''' copied from energyflow '''
     eps = 0.0001
-    m2s = (p4s[...,0]*(1+eps))**2 - p4s[...,1]**2 - p4s[...,2]**2 - p4s[...,3]**2
+    m2s = (p4s[...,0]*(1+eps))**2 - p4s[...,1]**2 - p4s[...,2]**2 - p4s[...,3]**2+eps
     mask = (m2s < 0)
     if torch.sum(mask)>0:
       print(m2s[mask],p4s[mask])

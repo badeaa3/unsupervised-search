@@ -34,8 +34,8 @@ class StepLightning(pl.LightningModule):
 
         # create padding mask with True where padded
         mask = (x[:,:,0] == 0).bool()
-        ae_out, jet_choice = self.Encoder(x, w, mask)
-        return ae_out, jet_choice
+        ae_out, jet_choice, scores = self.Encoder(x, w, mask)
+        return ae_out, jet_choice, scores
         
     def step(self, batch, batch_idx, version):
         
@@ -51,14 +51,16 @@ class StepLightning(pl.LightningModule):
 
         # forward pass
         x = batch
-        (c1, c2, c1_out, c2_out, c1random, c2random, c1random_out, c2random_out, c0mass), jet_choice = self(x)
+        (c1, c2, c1_out, c2_out, c1random, c2random, c1random_out, c2random_out, c0mass), jet_choice, scores = self(x)
         hard_jet_choice = torch.argmax(jet_choice,dim=-1)
         count_ISR = torch.mean(torch.sum(hard_jet_choice==0, -1).float())
         count_g1  = torch.mean(torch.sum(hard_jet_choice==1, -1).float())
         count_g2  = torch.mean(torch.sum(hard_jet_choice==2, -1).float())
+        count_gdiff  = torch.mean(torch.abs(torch.sum(hard_jet_choice==1, -1).float()-torch.sum(hard_jet_choice==2, -1).float()))
         self.log("count_ISR", count_ISR, on_step=True)
         self.log("count_g1", count_g1, on_step=True)
         self.log("count_g2", count_g2, on_step=True)
+        self.log("count_gdiff", count_gdiff, on_step=True)
         mass1_in = torch.mean(c1[:,-1])
         mass2_in = torch.mean(c2[:,-1])
         mass1_out = torch.mean(c1_out[:,-1])
@@ -79,12 +81,25 @@ class StepLightning(pl.LightningModule):
         return loss["loss"]
     
     def training_step(self, batch, batch_idx):
+        if batch_idx==0:
+            x = batch
+            (c1, c2, c1_out, c2_out, c1random, c2random, c1random_out, c2random_out, c0mass), jet_choice, scores = self(x)
+            print("training step c1",c1[0])
+            print("training step c2",c2[0])
+            print("training step c1_out",c1_out[0])
+            print("training step c2_out",c2_out[0])
+            print("training step c1random",c1random[0])
+            print("training step c2random",c2random[0])
+            print("training step c1random_out",c1random_out[0])
+            print("training step c2random_out",c2random_out[0])
+            print("training step jet_choice",jet_choice[0])
+            print("training step scores",scores[0])
         return self.step(batch, batch_idx, "train")
 
     def validation_step(self, batch, batch_idx):
         if batch_idx==0:
             x = batch
-            (c1, c2, c1_out, c2_out, c1random, c2random, c1random_out, c2random_out, c0mass), jet_choice = self(x)
+            (c1, c2, c1_out, c2_out, c1random, c2random, c1random_out, c2random_out, c0mass), jet_choice, scores = self(x)
             print("validation step c1",c1[0])
             print("validation step c2",c2[0])
             print("validation step c1_out",c1_out[0])
@@ -94,6 +109,7 @@ class StepLightning(pl.LightningModule):
             print("validation step c1random_out",c1random_out[0])
             print("validation step c2random_out",c2random_out[0])
             print("validation step jet_choice",jet_choice[0])
+            print("validation step scores",scores[0])
         return self.step(batch,batch_idx, "val")
 
     def configure_optimizers(self):
@@ -121,14 +137,17 @@ class StepLightning(pl.LightningModule):
 
         # total loss
         l = {}
-        l["mse"]         =  torch.mean((c1_out-c1)**2 + (c2_out-c2)**2)
-        l["mse_crossed"] =  torch.mean((c1_out-c2)**2 + (c2_out-c1)**2)
-        l["mse_c0mass"] =  torch.mean(c0mass)
-        l["mse_random"]  =  torch.mean((c1random_out-c1random)**2 + (c2random_out-c2random)**2)
-        l["mse_negative"]  = -torch.mean((c1random_out-c1)**2 + (c2random_out-c2)**2 + (c1random_out-c2)**2 + (c2random_out-c1)**2) #negative, maximize difference to random
-        l["mse_negative"] *= self.loss_config["scale_random_loss"]
+        #l["mse"]         =  torch.mean((c1_out-c1)**2 + (c2_out-c2)**2)
+        #l["mse_crossed"] =  torch.mean((c1_out-c2)**2 + (c2_out-c1)**2)
+        l["mse_c0mass"]  =  torch.mean(c0mass)
+        l["mse_massdiff"]  =  torch.mean((c1[:,-1]-c2[:,-1])**2)
+        #l["mse_random"]  =  torch.mean((c1random_out-c1random)**2 + (c2random_out-c2random)**2)
+        #l["mse_negative"]  = -torch.mean((c1random_out-c1)**2 + (c2random_out-c2)**2 + (c1random_out-c2)**2 + (c2random_out-c1)**2) #negative, maximize difference to random
+        #l["mse_negative"] *= self.loss_config["scale_random_loss"]
 
         # get total
         l['loss'] = sum(l.values())
+        if l['loss'].isnan():
+            sys.exit(1)
         #print(l)
         return l

@@ -20,7 +20,8 @@
       "doWij" : true,
       "ae_dim" : 4,
       "ae_depth" : 2,
-      "doCandidateAttention" : true
+      "doCandidateAttention" : true,
+      "random_mode" : "A"
     },
     "loss_config": {
       "scale_random_loss": 0.1

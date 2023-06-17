@@ -77,13 +77,12 @@ if __name__ == "__main__":
         log_every_n_steps=5,
         callbacks=callbacks,
         default_root_dir=checkpoint_dir,
-        # detect_anomaly=True,
+        #detect_anomaly=True,
         **config["trainer"]
     )
     
     # fit
-    with torch.autograd.set_detect_anomaly(True):
-        trainer.fit(model, train_dataloader, val_dataloader)
+    trainer.fit(model, train_dataloader, val_dataloader)
     
     # save model
     trainer.save_checkpoint(os.path.join(checkpoint_dir,"finalWeights.ckpt"))
