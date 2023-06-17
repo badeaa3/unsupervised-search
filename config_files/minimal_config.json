@@ -12,10 +12,10 @@
       "attn_block_ffwd_on": true,
       "attn_block_ffwd_nlayers": 3,
       "attn_block_ffwd_dim": 10,
-      "out_dim": 3,
+      "out_dim": 2,
       "gumble_softmax_config": {
         "tau": 1,
-        "hard": false
+        "hard": true
       },
       "doWij" : true,
       "ae_dim" : 4,
@@ -48,5 +48,5 @@
     "precision": 32,
     "gradient_clip_val": 0.1
   },
-  "batch_size": 1024
+  "batch_size": 2048
 }

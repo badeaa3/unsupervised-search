@@ -137,7 +137,7 @@ class Encoder(nn.Module):
         super().__init__()
 
         # number of target (T) objects (g1,g2,ISR)
-        self.T = 3
+        self.T = 2
 
         # embed, In -> Out : J,C -> J,E
         self.embed = Embed(embed_input_dim, embed_nlayers*[embed_dim], normalize_input=True)
@@ -161,8 +161,8 @@ class Encoder(nn.Module):
         
         # ends in a candidate attention block
         # final output is T,E
-        self.ae_in  = AE_block(embed_dim-3+1, ae_dim, ae_depth)
-        self.ae_out = AE_block(ae_dim, embed_dim-3+1, ae_depth)
+        self.ae_in  = AE_block(embed_dim-self.T+1, ae_dim, ae_depth)
+        self.ae_out = AE_block(ae_dim, embed_dim-self.T+1, ae_depth)
         self.random_mode = random_mode
 
     def forward(self, x, w, mask, loss=None):
@@ -219,30 +219,31 @@ class Encoder(nn.Module):
         c       = torch.cat([c[:,:,self.T:],cmass[:,:,None]],-1) #drop the category scores, add the mass
         crandom = torch.cat([crandom[:,:,self.T:],crandommass[:,:,None]],-1) #drop the category scores, add the mass
 
-        cISR = c[:,0]
+        #cISR = c[:,0]
 
-        c1        = c[:,1]
+        c1        = c[:,0]
         c1_latent = self.ae_in(c1)
         c1_out    = self.ae_out(c1_latent)
 
-        c2        = c[:,2]
+        c2        = c[:,1]
         c2_latent = self.ae_in(c2)
         c2_out    = self.ae_out(c2_latent)
 
-        c1random        = crandom[:,1]
+        c1random        = crandom[:,0]
         c1random_latent = self.ae_in(c1random)
         c1random_out    = self.ae_out(c1random_latent)
 
-        c2random        = crandom[:,2]
+        c2random        = crandom[:,1]
         c2random_latent = self.ae_in(c2random)
         c2random_out    = self.ae_out(c2random_latent)
         #inspect(c,cmass,crandom,crandommass, c1_out,c2_out,c1random_out,c2random_out, x, originalx, jp4, cp4, cchoice, randomchoice)
 
-        return (c1, c2, c1_out, c2_out, c1random, c2random, c1random_out, c2random_out, cp4[:,0,0]), cchoice, x[:,:,:self.T]
+        return (c1, c2, c1_out, c2_out, c1random, c2random, c1random_out, c2random_out, 0), cchoice, x[:,:,:self.T]
 
     def get_jet_choice(self,x, debug=False):
         if self.training:
             # differential but relies on probability distribution
+            #cchoice = nn.functional.softmax(x[:,:,:self.T]/0.1, dim=2) # J, T
             cchoice = nn.functional.gumbel_softmax(x[:,:,:self.T], dim=2, **self.gumble_softmax_config) # J, T
         else:
             # not differential but justs max per row
