@@ -55,7 +55,7 @@ def evaluate(config):
             start, end = i*ops.batch_size, (i+1)*ops.batch_size
             # be careful about the memory transfers to not use all gpu memory
             temp = x[start:end].to(config["device"])
-            ae, jet_choice = model(temp)
+            ae, jet_choice, scores, interm_masses = model(temp)
             jet_choice = jet_choice.cpu()
             p.append(jet_choice)
 
@@ -67,7 +67,7 @@ def evaluate(config):
         # apply mask to x
         x = x.masked_fill(mask.unsqueeze(-1).repeat(1,1,x.shape[-1]).bool(), 0)
         pmom_max, pidx_max = get_mass_max(x, p)
-        pmom_set, pidx_set = get_mass_set(x, p)
+        #pmom_set, pidx_set = get_mass_set(x, p)
                 
         # make output
         outData = {
@@ -75,8 +75,8 @@ def evaluate(config):
             "jet_p4": x.numpy(), # raw jets
             "pred_jet_assignments_max" : pidx_max.numpy(), # interpreted prediction to jet assignments with max per jet
             "pred_ptetaphim_max" : pmom_max.cpu().numpy(), # predicted 4-mom (pt,eta,phi,m)
-            "pred_jet_assignments_set" : pidx_set.numpy(), # interpreted prediction to jet assignments with set number of jets per parent
-            "pred_ptetaphim_set" : pmom_set.cpu().numpy(), # predicted 4-mom (pt,eta,phi,m)
+           # "pred_jet_assignments_set" : pidx_set.numpy(), # interpreted prediction to jet assignments with set number of jets per parent
+           # "pred_ptetaphim_set" : pmom_set.cpu().numpy(), # predicted 4-mom (pt,eta,phi,m)
         }
         
         # if truth labels then do y

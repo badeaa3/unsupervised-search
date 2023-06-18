@@ -56,8 +56,8 @@ class AttnBlock(nn.Module):
     def __init__(self,
                  embed_dim = 4,
                  num_heads = 1,
-                 attn_dropout = 0,
-                 add_bias_kv = False,
+                 attn_dropout = 0.1,
+                 add_bias_kv = True,
                  kdim = None,
                  vdim = None,
                  ffwd_dims = [16,16],
@@ -140,7 +140,7 @@ class Encoder(nn.Module):
         self.T = 2
 
         # embed, In -> Out : J,C -> J,E
-        self.embed = Embed(embed_input_dim, embed_nlayers*[embed_dim], normalize_input=True)
+        self.embed = Embed(embed_input_dim, embed_nlayers*[embed_dim], normalize_input=True, final_layer=[embed_dim,embed_dim])
 
         # position encoding based on (eta,cos(phi),sin(phi))
         self.doWij = doWij
@@ -167,6 +167,7 @@ class Encoder(nn.Module):
 
     def forward(self, x, w, mask, loss=None):
 
+        intermediate_masses = []
         # embed and remask, In -> Out : J,C -> J,E
         originalx = x
         x = self.embed(x)
@@ -198,34 +199,34 @@ class Encoder(nn.Module):
             # cross attention, In -> Out : (J,E)x(E,T)x(T,E) -> J,E
             x = self.cross_blocks[ib](Q=x, K=c, V=c, key_padding_mask=None, attn_mask=None) # J,E
             x = x.masked_fill(mask.unsqueeze(-1).repeat(1,1,x.shape[-1]).bool(), 0)
-	#end for
             
-        #build candidate mass from original jet 4-vector
-        jp4 = x_to_p4(originalx)
-        cchoice  = self.get_jet_choice(x, debug=False)
-        cp4 = torch.bmm(cchoice.transpose(2,1), jp4)
-        cmass = ms_from_p4s(cp4)
+            #build candidate mass from original jet 4-vector
+            jp4 = x_to_p4(originalx)
+            cchoice  = self.get_jet_choice(x, debug=False)
+            cp4 = torch.bmm(cchoice.transpose(2,1), jp4)
+            cmass = ms_from_p4s(cp4)/100
+            intermediate_masses.append(cmass)
 
         #build random candidates
         randomchoice = self.get_random_choice(cchoice, mask)
         crandom = torch.bmm(randomchoice.transpose(2,1), x)
         crandom = self.cand_blocks[ib](Q=c, K=c, V=c, key_padding_mask=None, attn_mask=None)
         crandomp4 = torch.bmm(randomchoice.transpose(2,1), jp4)
-        crandommass = ms_from_p4s(crandomp4)
+        crandommass = ms_from_p4s(crandomp4)/100
 
-        #autoencoders
-        cmass       /= 100.
-        crandommass /= 100.
         c       = torch.cat([c[:,:,self.T:],cmass[:,:,None]],-1) #drop the category scores, add the mass
         crandom = torch.cat([crandom[:,:,self.T:],crandommass[:,:,None]],-1) #drop the category scores, add the mass
+        #c       = c[:,:,self.T:]
+        #crandom = crandom[:,:,self.T:]
 
+        #autoencoders
         #cISR = c[:,0]
 
-        c1        = c[:,0]
+        c1        = c[:,self.T-2]
         c1_latent = self.ae_in(c1)
         c1_out    = self.ae_out(c1_latent)
 
-        c2        = c[:,1]
+        c2        = c[:,self.T-1]
         c2_latent = self.ae_in(c2)
         c2_out    = self.ae_out(c2_latent)
 
@@ -238,13 +239,13 @@ class Encoder(nn.Module):
         c2random_out    = self.ae_out(c2random_latent)
         #inspect(c,cmass,crandom,crandommass, c1_out,c2_out,c1random_out,c2random_out, x, originalx, jp4, cp4, cchoice, randomchoice)
 
-        return (c1, c2, c1_out, c2_out, c1random, c2random, c1random_out, c2random_out, 0), cchoice, x[:,:,:self.T]
+        return (c1, c2, c1_out, c2_out, c1random, c2random, c1random_out, c2random_out, cp4), cchoice, x, torch.cat(intermediate_masses)
 
     def get_jet_choice(self,x, debug=False):
         if self.training:
             # differential but relies on probability distribution
-            #cchoice = nn.functional.softmax(x[:,:,:self.T]/0.1, dim=2) # J, T
-            cchoice = nn.functional.gumbel_softmax(x[:,:,:self.T], dim=2, **self.gumble_softmax_config) # J, T
+            cchoice = nn.functional.softmax(x[:,:,:self.T]/0.1, dim=2) # J, T
+            #cchoice = nn.functional.gumbel_softmax(x[:,:,:self.T], dim=2, **self.gumble_softmax_config) # J, T
         else:
             # not differential but justs max per row
             if debug:
