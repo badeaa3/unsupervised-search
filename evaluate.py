@@ -31,11 +31,12 @@ def evaluate(config):
     ''' perform the full model evaluation '''
     
     ops = options()
+    config["model"]["weights"] = ops.weights
 
     print(f"evaluating on {config['inFileName']}")
 
     # load model
-    model = StepLightning(config["model"]["encoder_config"], weights = ops.weights)
+    model = StepLightning(**config["model"])
     model.to(config["device"])
     model.eval()
     model.Encoder.eval()
