@@ -137,7 +137,7 @@ class Encoder(nn.Module):
         super().__init__()
 
         # number of target (T) objects (g1,g2,ISR)
-        self.T = 2
+        self.T = 3
 
         # embed, In -> Out : J,C -> J,E
         self.embed = Embed(embed_input_dim, embed_nlayers*[embed_dim], normalize_input=True, final_layer=[embed_dim,embed_dim])
@@ -204,7 +204,7 @@ class Encoder(nn.Module):
             jp4 = x_to_p4(originalx)
             cchoice  = self.get_jet_choice(x, debug=False)
             cp4 = torch.bmm(cchoice.transpose(2,1), jp4)
-            cmass = ms_from_p4s(cp4)/100
+            cmass = ms_from_p4s(cp4)/100 #arbitrary scaling factor 
             intermediate_masses.append(cmass)
 
         #build random candidates
@@ -212,7 +212,7 @@ class Encoder(nn.Module):
         crandom = torch.bmm(randomchoice.transpose(2,1), x)
         crandom = self.cand_blocks[ib](Q=c, K=c, V=c, key_padding_mask=None, attn_mask=None)
         crandomp4 = torch.bmm(randomchoice.transpose(2,1), jp4)
-        crandommass = ms_from_p4s(crandomp4)/100
+        crandommass = ms_from_p4s(crandomp4)/100 #arbitrary scaling factor
 
         c       = torch.cat([c[:,:,self.T:],cmass[:,:,None]],-1) #drop the category scores, add the mass
         crandom = torch.cat([crandom[:,:,self.T:],crandommass[:,:,None]],-1) #drop the category scores, add the mass
@@ -242,6 +242,8 @@ class Encoder(nn.Module):
         return (c1, c2, c1_out, c2_out, c1random, c2random, c1random_out, c2random_out, cp4), cchoice, x, torch.cat(intermediate_masses)
 
     def get_jet_choice(self,x, debug=False):
+        if self.T==3:
+            x[:,:,0] -= 1
         if self.training:
             # differential but relies on probability distribution
             cchoice = nn.functional.softmax(x[:,:,:self.T]/0.1, dim=2) # J, T

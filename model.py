@@ -144,9 +144,10 @@ class StepLightning(pl.LightningModule):
         l = {}
         l["mse"]         =  torch.mean((c1_out-c1)**2 + (c2_out-c2)**2)
         l["mse_crossed"] =  torch.mean((c1_out-c2)**2 + (c2_out-c1)**2)
-        #l["mse_gluino_pt2"]  =  -torch.mean(cp4[:,-1,1]**2+cp4[:,-1,2]**2+cp4[:,-2,1]**2+cp4[:,-2,2]**2)
-        #l["mse_massdiff"]  =  torch.mean((c1[:,-1]-c2[:,-1])**2)
-        #l["mse_interm_massdiff"]  =  torch.mean((interm_masses[:,-1]-interm_masses[:,-2])**2)
+        l["ISR_energy"]  =  torch.mean(cp4[:,0,0])/10
+        #l["gluino_pt2"]  =  -torch.mean(torch.sqrt(cp4[:,-1,1]**2+cp4[:,-1,2]**2)+torch.sqrt(cp4[:,-2,1]**2+cp4[:,-2,2]**2))
+        #l["massdiff"]  =  torch.mean((c1[:,-1]-c2[:,-1])**2)/10
+        #l["interm_massdiff"]  =  torch.mean((interm_masses[:,-1]-interm_masses[:,-2])**2)
         #l["mse_random"]  =  torch.mean((c1random_out-c1random)**2 + (c2random_out-c2random)**2)
         #l["mse_negative"]  = -torch.mean((c1random_out-c1)**2 + (c2random_out-c2)**2 + (c1random_out-c2)**2 + (c2random_out-c1)**2) #negative, maximize difference to random
         #l["mse_negative"] *= self.loss_config["scale_random_loss"]
