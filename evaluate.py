@@ -42,7 +42,9 @@ def evaluate(config):
     model.Encoder.eval()
 
     # load data
-    x = loadDataFromH5(config["inFileName"])
+    x = loadDataFromH5(config["inFileName"], ops.normWeights)
+    if ops.normWeights:
+        x, w = x
     mask = (x[:,:,0] == 0)
     
     # evaluate
@@ -50,18 +52,25 @@ def evaluate(config):
     with torch.no_grad():
 
         # make predictions
-        p, sb = [], []
+        p, ae = [], []
         niters = int(np.ceil(x.shape[0]/ops.batch_size))
         for i in tqdm(range(niters)):
             start, end = i*ops.batch_size, (i+1)*ops.batch_size
             # be careful about the memory transfers to not use all gpu memory
             temp = x[start:end].to(config["device"])
-            ae, jet_choice, scores, interm_masses = model(temp)
+            ae_out, jet_choice, scores, interm_masses = model(temp)
+            c1, c2, c1_out, c2_out, c1random, c2random, c1random_out, c2random_out, cp4 = ae_out
+            c1, c2, c1_out, c2_out = c1.cpu(), c2.cpu(), c1_out.cpu(), c2_out.cpu()
             jet_choice = jet_choice.cpu()
+            ae.append(torch.stack([c1, c2, c1_out, c2_out],-1))
             p.append(jet_choice)
 
         # concat
         p = torch.concat(p)
+        ae = torch.concat(ae)
+        c1, c2, c1_out, c2_out = [ae[:,i] for i in range(4)]
+        mse_loss = torch.mean((c1_out-c1)**2 + (c2_out-c2)**2,-1)
+        mse_crossed_loss = torch.mean((c1_out-c2)**2 + (c2_out-c1)**2,-1)
         
         # convert x
         x = x_to_p4(x)
@@ -72,6 +81,8 @@ def evaluate(config):
                 
         # make output
         outData = {
+            "loss": mse_loss.numpy(), # raw prediction
+            "loss_crossed": mse_crossed_loss.numpy(), # raw prediction
             "pred": p.numpy(), # raw prediction
             "jet_p4": x.numpy(), # raw jets
             "pred_jet_assignments_max" : pidx_max.numpy(), # interpreted prediction to jet assignments with max per jet
@@ -79,6 +90,8 @@ def evaluate(config):
            # "pred_jet_assignments_set" : pidx_set.numpy(), # interpreted prediction to jet assignments with set number of jets per parent
            # "pred_ptetaphim_set" : pmom_set.cpu().numpy(), # predicted 4-mom (pt,eta,phi,m)
         }
+        if ops.normWeights:
+            outData['normweight'] = w
         
         # if truth labels then do y
         if not ops.noTruthLabels:
@@ -106,6 +119,7 @@ def options():
     parser.add_argument("-o",  "--outDir", help="Directory to save evaluation output to.", default="./")
     parser.add_argument("-j",  "--ncpu", help="Number of cores to use for multiprocessing. If not provided multiprocessing not done.", default=1, type=int)
     parser.add_argument("-w",  "--weights", help="Pretrained weights to evaluate with.", default=None, required=True)
+    parser.add_argument("--normWeights",action="store_true", help="Store also normalization weights")
     parser.add_argument("-b", "--batch_size", help="Batch size", default=10**5, type=int)
     parser.add_argument('--event_selection', default="", help="Enable event selection in batcher.")
     parser.add_argument('--doOverwrite', action="store_true", help="Overwrite already existing files.")

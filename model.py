@@ -144,7 +144,7 @@ class StepLightning(pl.LightningModule):
         l = {}
         l["mse"]         =  torch.mean((c1_out-c1)**2 + (c2_out-c2)**2)
         l["mse_crossed"] =  torch.mean((c1_out-c2)**2 + (c2_out-c1)**2)
-        l["ISR_energy"]  =  torch.mean(cp4[:,0,0])/10
+        l["ISR_energy"]  =  torch.mean(cp4[:,0,0])/20
         #l["gluino_pt2"]  =  -torch.mean(torch.sqrt(cp4[:,-1,1]**2+cp4[:,-1,2]**2)+torch.sqrt(cp4[:,-2,1]**2+cp4[:,-2,2]**2))
         #l["massdiff"]  =  torch.mean((c1[:,-1]-c2[:,-1])**2)/10
         #l["interm_massdiff"]  =  torch.mean((interm_masses[:,-1]-interm_masses[:,-2])**2)
