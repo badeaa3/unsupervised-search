@@ -77,7 +77,6 @@ def evaluate(config):
         # apply mask to x
         x = x.masked_fill(mask.unsqueeze(-1).repeat(1,1,x.shape[-1]).bool(), 0)
         pmom_max, pidx_max = get_mass_max(x, p)
-        #pmom_set, pidx_set = get_mass_set(x, p)
                 
         # make output
         outData = {
@@ -87,8 +86,6 @@ def evaluate(config):
             "jet_p4": x.numpy(), # raw jets
             "pred_jet_assignments_max" : pidx_max.numpy(), # interpreted prediction to jet assignments with max per jet
             "pred_ptetaphim_max" : pmom_max.cpu().numpy(), # predicted 4-mom (pt,eta,phi,m)
-           # "pred_jet_assignments_set" : pidx_set.numpy(), # interpreted prediction to jet assignments with set number of jets per parent
-           # "pred_ptetaphim_set" : pmom_set.cpu().numpy(), # predicted 4-mom (pt,eta,phi,m)
         }
         if ops.normWeights:
             outData['normweight'] = w

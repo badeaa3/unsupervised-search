@@ -167,7 +167,6 @@ class Encoder(nn.Module):
 
     def forward(self, x, w, mask, loss=None):
 
-        intermediate_masses = []
         # embed and remask, In -> Out : J,C -> J,E
         originalx = x
         x = self.embed(x)
@@ -200,12 +199,11 @@ class Encoder(nn.Module):
             x = self.cross_blocks[ib](Q=x, K=c, V=c, key_padding_mask=None, attn_mask=None) # J,E
             x = x.masked_fill(mask.unsqueeze(-1).repeat(1,1,x.shape[-1]).bool(), 0)
             
-            #build candidate mass from original jet 4-vector
-            jp4 = x_to_p4(originalx)
-            cchoice  = self.get_jet_choice(x, debug=False)
-            cp4 = torch.bmm(cchoice.transpose(2,1), jp4)
-            cmass = ms_from_p4s(cp4)/100 #arbitrary scaling factor 
-            intermediate_masses.append(cmass)
+        #build candidate mass from original jet 4-vector
+        jp4 = x_to_p4(originalx)
+        cchoice  = self.get_jet_choice(x, debug=False)
+        cp4 = torch.bmm(cchoice.transpose(2,1), jp4)
+        cmass = ms_from_p4s(cp4)/100 #arbitrary scaling factor 
 
         #build random candidates
         randomchoice = self.get_random_choice(cchoice, mask)
@@ -216,8 +214,6 @@ class Encoder(nn.Module):
 
         c       = torch.cat([c[:,:,self.T:],cmass[:,:,None]],-1) #drop the category scores, add the mass
         crandom = torch.cat([crandom[:,:,self.T:],crandommass[:,:,None]],-1) #drop the category scores, add the mass
-        #c       = c[:,:,self.T:]
-        #crandom = crandom[:,:,self.T:]
 
         #autoencoders
         #cISR = c[:,0]
@@ -239,7 +235,7 @@ class Encoder(nn.Module):
         c2random_out    = self.ae_out(c2random_latent)
         #inspect(c,cmass,crandom,crandommass, c1_out,c2_out,c1random_out,c2random_out, x, originalx, jp4, cp4, cchoice, randomchoice)
 
-        return (c1, c2, c1_out, c2_out, c1random, c2random, c1random_out, c2random_out, cp4), cchoice, x, torch.cat(intermediate_masses)
+        return (c1, c2, c1_out, c2_out, c1random, c2random, c1random_out, c2random_out, cp4), cchoice
 
     def get_jet_choice(self,x, debug=False):
         if self.T==3:
@@ -308,7 +304,6 @@ def x_to_p4(x):
     return torch.stack([e,px,py,pz], -1)
     
 def ms_from_p4s(p4s):
-
     ''' copied from energyflow '''
     eps = 0.0001
     m2s = (p4s[...,0]*(1+eps))**2 - p4s[...,1]**2 - p4s[...,2]**2 - p4s[...,3]**2+eps

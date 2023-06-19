@@ -34,8 +34,8 @@ class StepLightning(pl.LightningModule):
 
         # create padding mask with True where padded
         mask = (x[:,:,0] == 0).bool()
-        ae_out, jet_choice, scores, interm_masses = self.Encoder(x, w, mask)
-        return ae_out, jet_choice, scores, interm_masses
+        ae_out, jet_choice = self.Encoder(x, w, mask)
+        return ae_out, jet_choice
         
     def step(self, batch, batch_idx, version):
         
@@ -51,7 +51,7 @@ class StepLightning(pl.LightningModule):
 
         # forward pass
         x = batch
-        (c1, c2, c1_out, c2_out, c1random, c2random, c1random_out, c2random_out, cp4), jet_choice, scores, interm_masses = self(x)
+        (c1, c2, c1_out, c2_out, c1random, c2random, c1random_out, c2random_out, cp4), jet_choice = self(x)
         hard_jet_choice = torch.argmax(jet_choice,dim=-1)
         count_ISR = torch.mean(torch.sum(hard_jet_choice==self.Encoder.T-3, -1).float())
         count_g1  = torch.mean(torch.sum(hard_jet_choice==self.Encoder.T-2, -1).float())
@@ -72,7 +72,7 @@ class StepLightning(pl.LightningModule):
         self.log("massdiff", torch.mean((c1[:,-1]-c2[:,-1])**2))
         
         # compute loss
-        loss = self.loss(c1, c2, c1_out, c2_out, c1random, c2random, c1random_out, c2random_out, cp4, interm_masses)
+        loss = self.loss(c1, c2, c1_out, c2_out, c1random, c2random, c1random_out, c2random_out, cp4)
 
         # log the loss
         for key, val in loss.items():
@@ -81,10 +81,10 @@ class StepLightning(pl.LightningModule):
         #print(loss["loss"])
         return loss["loss"]
     
-    def training_step(self, batch, batch_idx):
-        if batch_idx==0:
+    def training_step(self, batch, batch_idx, debug=False):
+        if debug and batch_idx==0:
             x = batch
-            (c1, c2, c1_out, c2_out, c1random, c2random, c1random_out, c2random_out, cp4), jet_choice, scores, interm_masses = self(x)
+            (c1, c2, c1_out, c2_out, c1random, c2random, c1random_out, c2random_out, cp4), jet_choice = self(x)
             print("training step c1",c1[0])
             print("training step c2",c2[0])
             print("training step c1_out",c1_out[0])
@@ -95,14 +95,12 @@ class StepLightning(pl.LightningModule):
             print("training step c2random_out",c2random_out[0])
             print("training step cp4",cp4[0])
             print("training step jet_choice",jet_choice[0])
-            print("training step scores",scores[0])
-            print("training step interm_masses",interm_masses[0],interm_masses.shape)
         return self.step(batch, batch_idx, "train")
 
-    def validation_step(self, batch, batch_idx):
-        if batch_idx==0:
+    def validation_step(self, batch, batch_idx, debug=False):
+        if debug and batch_idx==0:
             x = batch
-            (c1, c2, c1_out, c2_out, c1random, c2random, c1random_out, c2random_out, cp4), jet_choice, scores, interm_masses = self(x)
+            (c1, c2, c1_out, c2_out, c1random, c2random, c1random_out, c2random_out, cp4), jet_choice = self(x)
             print("validation step x",x[0])
             print("validation step c1",c1[0])
             print("validation step c2",c2[0])
@@ -113,8 +111,6 @@ class StepLightning(pl.LightningModule):
             print("validation step c1random_out",c1random_out[0])
             print("validation step c2random_out",c2random_out[0])
             print("validation step jet_choice",jet_choice[0])
-            print("validation step scores",scores[0])
-            print("validation step interm_masses",interm_masses[0],interm_masses.shape)
         return self.step(batch,batch_idx, "val")
 
     def configure_optimizers(self):
@@ -134,7 +130,7 @@ class StepLightning(pl.LightningModule):
             lr_scale = 0.95
             pg["lr"] = self.lr * (lr_scale**(self.trainer.global_step // N))
     
-    def loss(self, c1, c2, c1_out, c2_out, c1random, c2random, c1random_out, c2random_out, cp4, interm_masses):
+    def loss(self, c1, c2, c1_out, c2_out, c1random, c2random, c1random_out, c2random_out, cp4):
 
         ''' 
         cout/cin = [B, E]
@@ -147,13 +143,11 @@ class StepLightning(pl.LightningModule):
         l["ISR_energy"]  =  torch.mean(cp4[:,0,0])/20
         #l["gluino_pt2"]  =  -torch.mean(torch.sqrt(cp4[:,-1,1]**2+cp4[:,-1,2]**2)+torch.sqrt(cp4[:,-2,1]**2+cp4[:,-2,2]**2))
         #l["massdiff"]  =  torch.mean((c1[:,-1]-c2[:,-1])**2)/10
-        #l["interm_massdiff"]  =  torch.mean((interm_masses[:,-1]-interm_masses[:,-2])**2)
         #l["mse_random"]  =  torch.mean((c1random_out-c1random)**2 + (c2random_out-c2random)**2)
         #l["mse_negative"]  = -torch.mean((c1random_out-c1)**2 + (c2random_out-c2)**2 + (c1random_out-c2)**2 + (c2random_out-c1)**2) #negative, maximize difference to random
         #l["mse_negative"] *= self.loss_config["scale_random_loss"]
 
         # get total
         l['loss'] = sum(l.values())
-        if l['loss'].isnan():
-            sys.exit(1)
+        #print(l)
         return l
