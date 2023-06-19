@@ -80,7 +80,7 @@ if __name__ == "__main__":
         log_every_n_steps=5,
         callbacks=callbacks,
         default_root_dir=checkpoint_dir,
-        #detect_anomaly=True,
+        # detect_anomaly=True,
         **config["trainer"]
     )
     
