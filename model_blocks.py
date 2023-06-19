@@ -132,7 +132,7 @@ class AE_block(nn.Module):
 
 class Encoder(nn.Module):
 
-    def __init__(self, embed_input_dim, embed_nlayers, embed_dim, mlp_input_dim, mlp_nlayers, mlp_dim, attn_blocks_n, attn_block_num_heads, attn_block_ffwd_on, attn_block_ffwd_nlayers, attn_block_ffwd_dim, gumble_softmax_config, out_dim, doWij, doCandidateAttention, ae_dim, ae_depth, random_mode):
+    def __init__(self, embed_input_dim, embed_nlayers, embed_dim, mlp_input_dim, mlp_nlayers, mlp_dim, attn_blocks_n, attn_block_num_heads, attn_block_ffwd_on, attn_block_ffwd_nlayers, attn_block_ffwd_dim, gumbel_softmax_config, out_dim, doWij, doCandidateAttention, ae_dim, ae_depth, random_mode, do_gumbel):
 
         super().__init__()
 
@@ -153,7 +153,7 @@ class Encoder(nn.Module):
         self.obj_blocks = nn.ModuleList([AttnBlock(embed_dim=embed_dim, num_heads=attn_block_num_heads, ffwd_dims=ffwd_dims[cfg]) for cfg in range(attn_blocks_n)])
         
         # candidate attention blocks, In -> Out : T,E -> T,E
-        self.gumble_softmax_config = gumble_softmax_config
+        self.gumbel_softmax_config = gumbel_softmax_config
         self.cand_blocks = nn.ModuleList([AttnBlock(embed_dim=embed_dim, num_heads=attn_block_num_heads, ffwd_dims=ffwd_dims[cfg]) for cfg in range(attn_blocks_n)])
         
         # cross attention blocks, In -> Out : J,E -> J,E
@@ -164,6 +164,7 @@ class Encoder(nn.Module):
         self.ae_in  = AE_block(embed_dim-self.T+1, ae_dim, ae_depth)
         self.ae_out = AE_block(ae_dim, embed_dim-self.T+1, ae_depth)
         self.random_mode = random_mode
+        self.do_gumbel = do_gumbel
 
     def forward(self, x, w, mask, loss=None):
 
@@ -242,8 +243,10 @@ class Encoder(nn.Module):
             x[:,:,0] -= 1
         if self.training:
             # differential but relies on probability distribution
-            cchoice = nn.functional.softmax(x[:,:,:self.T]/0.1, dim=2) # J, T
-            #cchoice = nn.functional.gumbel_softmax(x[:,:,:self.T], dim=2, **self.gumble_softmax_config) # J, T
+            if self.do_gumbel:
+                cchoice = nn.functional.gumbel_softmax(x[:,:,:self.T], dim=2, **self.gumbel_softmax_config) # J, T
+            else:
+                cchoice = nn.functional.softmax(x[:,:,:self.T]/0.1, dim=2) # J, T
         else:
             # not differential but justs max per row
             if debug:
