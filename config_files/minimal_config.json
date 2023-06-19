@@ -12,7 +12,7 @@
       "attn_block_ffwd_on": true,
       "attn_block_ffwd_nlayers": 3,
       "attn_block_ffwd_dim": 8,
-      "out_dim": 2,
+      "out_dim": 3,
       "gumble_softmax_config": {
         "tau": 1,
         "hard": false

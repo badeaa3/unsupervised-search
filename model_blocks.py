@@ -137,7 +137,7 @@ class Encoder(nn.Module):
         super().__init__()
 
         # number of target (T) objects (g1,g2,ISR)
-        self.T = 3
+        self.T = out_dim
 
         # embed, In -> Out : J,C -> J,E
         self.embed = Embed(embed_input_dim, embed_nlayers*[embed_dim], normalize_input=True, final_layer=[embed_dim,embed_dim])
