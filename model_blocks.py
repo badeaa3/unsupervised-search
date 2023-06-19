@@ -239,7 +239,7 @@ class Encoder(nn.Module):
 
     def get_jet_choice(self,x, debug=False):
         if self.T==3:
-            x[:,:,0] -= 0
+            x[:,:,0] -= 1
         if self.training:
             # differential but relies on probability distribution
             cchoice = nn.functional.softmax(x[:,:,:self.T]/0.1, dim=2) # J, T
