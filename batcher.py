@@ -11,6 +11,7 @@ import argparse
 # Load data in agreed upon format
 def loadDataFromH5(
         inFile, 
+        normWeights=False
 ):
     with h5py.File(inFile, "r") as f:
 
@@ -28,9 +29,18 @@ def loadDataFromH5(
         phi = np.array(f['source']['phi'])
         # eta
         eta = np.array(f['source']['eta'])
+        #selection cuts
+        njet = np.sum(e>0,-1)
+        cuts = njet >=6
         # stack
         X = np.stack([pt,eta,np.cos(phi),np.sin(phi),e],-1)
+        X = X[cuts]
         X = torch.Tensor(X)
+
+        if normWeights:
+            w = np.array(f['EventVars']['normweight'])
+            w = w[cuts]
+            X = (X,w)
         
     if len(np.where(X!=X)[0]) > 0:
         print("Checking for nan's in X: ", np.where(X!=X)[0])

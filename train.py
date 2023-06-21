@@ -32,6 +32,7 @@ if __name__ == "__main__":
     parser.add_argument("-e", "--max_epochs", help="Max number of epochs to train on", default=None, type=int)
     parser.add_argument("-s", "--max_steps", help="Max number of steps to train on", default=-1, type=int)
     parser.add_argument("-d", "--device", help="Device to use.", default=None)
+    parser.add_argument("-w", "--weights", help="Initial weights.", default=None)
     ops = parser.parse_args()
 
     # load configuration
@@ -39,6 +40,8 @@ if __name__ == "__main__":
     with open(ops.config_file, 'r') as fp:
         config = json.load(fp)
     print(config)
+
+    config["model"]["weights"] = ops.weights
 
     # decide on device
     device = ops.device

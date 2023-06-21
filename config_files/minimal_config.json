@@ -13,17 +13,20 @@
       "attn_block_ffwd_nlayers": 3,
       "attn_block_ffwd_dim": 8,
       "out_dim": 3,
-      "gumble_softmax_config": {
+      "do_gumbel": false,
+      "gumbel_softmax_config": {
         "tau": 1,
         "hard": false
       },
       "doWij" : true,
       "ae_dim" : 4,
-      "ae_depth" : 3,
-      "doCandidateAttention" : true
+      "ae_depth" : 2,
+      "doCandidateAttention" : true,
+      "random_mode" : "A"
     },
     "loss_config": {
-      "scale_random_loss": 0.1
+      "scale_random_loss": 0.1,
+      "scale_ISR_loss": 0.05
     },
     "weights": false,
     "lr": 0.001,

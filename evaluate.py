@@ -13,6 +13,7 @@ import h5py
 import json
 import glob
 from tqdm import tqdm 
+from model_blocks import x_to_p4
 
 # multiprocessing
 import torch.multiprocessing as mp
@@ -30,17 +31,20 @@ def evaluate(config):
     ''' perform the full model evaluation '''
     
     ops = options()
+    config["model"]["weights"] = ops.weights
 
     print(f"evaluating on {config['inFileName']}")
 
     # load model
-    model = StepLightning(config["encoder_config"], weights = ops.weights)
+    model = StepLightning(**config["model"])
     model.to(config["device"])
     model.eval()
     model.Encoder.eval()
 
     # load data
-    x, y, _ = loadDataFromH5(config["inFileName"], eventSelection=ops.event_selection, loadWeights=False, noLabels=ops.noTruthLabels, truthSB=False)
+    x = loadDataFromH5(config["inFileName"], ops.normWeights)
+    if ops.normWeights:
+        x, w = x
     mask = (x[:,:,0] == 0)
     
     # evaluate
@@ -48,36 +52,43 @@ def evaluate(config):
     with torch.no_grad():
 
         # make predictions
-        p, sb = [], []
+        p, ae = [], []
         niters = int(np.ceil(x.shape[0]/ops.batch_size))
         for i in tqdm(range(niters)):
             start, end = i*ops.batch_size, (i+1)*ops.batch_size
             # be careful about the memory transfers to not use all gpu memory
             temp = x[start:end].to(config["device"])
-            pi, _ = model(temp)
-            pi, _ = pi.cpu(), _.cpu()
-            p.append(pi)
+            ae_out, jet_choice, scores, interm_masses = model(temp)
+            c1, c2, c1_out, c2_out, c1random, c2random, c1random_out, c2random_out, cp4 = ae_out
+            c1, c2, c1_out, c2_out = c1.cpu(), c2.cpu(), c1_out.cpu(), c2_out.cpu()
+            jet_choice = jet_choice.cpu()
+            ae.append(torch.stack([c1, c2, c1_out, c2_out],-1))
+            p.append(jet_choice)
 
         # concat
         p = torch.concat(p)
+        ae = torch.concat(ae)
+        c1, c2, c1_out, c2_out = [ae[:,i] for i in range(4)]
+        mse_loss = torch.mean((c1_out-c1)**2 + (c2_out-c2)**2,-1)
+        mse_crossed_loss = torch.mean((c1_out-c2)**2 + (c2_out-c1)**2,-1)
         
         # convert x
-        pt, eta, cphi, sphi, e = np.exp(x[:,:,0]), x[:,:,1], x[:,:,2], x[:,:,3], np.exp(x[:,:,4])
-        px, py, pz = pt*cphi, pt*sphi, pt*np.sinh(eta)
-        x = torch.Tensor(np.stack([e,px,py,pz],-1))
+        x = x_to_p4(x)
         # apply mask to x
         x = x.masked_fill(mask.unsqueeze(-1).repeat(1,1,x.shape[-1]).bool(), 0)
         pmom_max, pidx_max = get_mass_max(x, p)
-        pmom_set, pidx_set = get_mass_set(x, p)
                 
         # make output
         outData = {
+            "loss": mse_loss.numpy(), # raw prediction
+            "loss_crossed": mse_crossed_loss.numpy(), # raw prediction
             "pred": p.numpy(), # raw prediction
+            "jet_p4": x.numpy(), # raw jets
             "pred_jet_assignments_max" : pidx_max.numpy(), # interpreted prediction to jet assignments with max per jet
             "pred_ptetaphim_max" : pmom_max.cpu().numpy(), # predicted 4-mom (pt,eta,phi,m)
-            "pred_jet_assignments_set" : pidx_set.numpy(), # interpreted prediction to jet assignments with set number of jets per parent
-            "pred_ptetaphim_set" : pmom_set.cpu().numpy(), # predicted 4-mom (pt,eta,phi,m)
         }
+        if ops.normWeights:
+            outData['normweight'] = w
         
         # if truth labels then do y
         if not ops.noTruthLabels:
@@ -105,6 +116,7 @@ def options():
     parser.add_argument("-o",  "--outDir", help="Directory to save evaluation output to.", default="./")
     parser.add_argument("-j",  "--ncpu", help="Number of cores to use for multiprocessing. If not provided multiprocessing not done.", default=1, type=int)
     parser.add_argument("-w",  "--weights", help="Pretrained weights to evaluate with.", default=None, required=True)
+    parser.add_argument("--normWeights",action="store_true", help="Store also normalization weights")
     parser.add_argument("-b", "--batch_size", help="Batch size", default=10**5, type=int)
     parser.add_argument('--event_selection', default="", help="Enable event selection in batcher.")
     parser.add_argument('--doOverwrite', action="store_true", help="Overwrite already existing files.")
