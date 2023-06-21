@@ -27,29 +27,42 @@ def cast(a, b, op="add"):
 
 #%%%%%%% Classes %%%%%%%%#
 
-class Embed(nn.Module):
-    def __init__(self, input_dim, dims, normalize_input=True, final_layer=None):
+class DNN_block(nn.Module):
+
+    '''
+    Similar to the embedding block, just takes care of progressive up/down shifting of layer size
+    '''
+
+    def __init__(self, input_dim, output_dim, dimensions, normalize_input):
+
         super().__init__()
 
+        # if user inputs int dimensions then expects a cascade of depth
+        if isinstance(dimensions, int):
+            depth = dimensions
+            dimensions = [int(output_dim + (input_dim - output_dim)*(depth-i)/depth) for i in range(depth+1)]
+
         self.input_bn = nn.BatchNorm1d(input_dim) if normalize_input else None
-        module_list = []
-        for dim in dims:
-            module_list.extend([
-                nn.Linear(input_dim, dim),
-                nn.LayerNorm(dim),
-                nn.ReLU(),
-            ])
-            input_dim = dim
-        if final_layer is not None:
-            module_list.append(nn.Linear(final_layer[0], final_layer[1]))
-        self.embed = nn.Sequential(*module_list)
+
+        layers = []
+        for iD, (dim_in, dim_out) in enumerate(zip(dimensions, dimensions[1:])):
+            if dim_out != output_dim or iD != len(dimensions[1:])-1:
+                layers.extend([
+                    nn.Linear(dim_in, dim_out),
+                    nn.LayerNorm(dim_out),
+                    nn.ReLU(),
+                ])
+            else:
+                layers.extend([
+                    nn.Linear(dim_in, dim_out),
+                ])
+        self.net = nn.Sequential(*layers)
 
     def forward(self, x):
         if self.input_bn is not None:
             x = self.input_bn(x.transpose(1,2)) # must transpose because batchnorm expects N,C,L rather than N,L,C like multihead
             x = x.transpose(1,2) # revert transpose
-        x = self.embed(x)
-        return x
+        return self.net(x)
 
 class AttnBlock(nn.Module):
 
@@ -108,31 +121,6 @@ class AttnBlock(nn.Module):
 
         return V
 
-class AE_block(nn.Module):
-    ''' 
-    Similar to the embedding block, just takes care of progressive up/down shifting of layer size 
-    '''
-    def __init__(self, input_dim, output_dim, depth=4):
-
-        super().__init__()
-        dimensions = [int(output_dim + (input_dim - output_dim)*(depth-i)/depth) for i in range(depth+1)]
-        layers = []
-        for dim_in, dim_out in zip(dimensions, dimensions[1:]):
-            if dim_out != output_dim:
-                layers.extend([
-                    nn.Linear(dim_in, dim_out),
-                    nn.LayerNorm(dim_out),
-                    nn.ReLU(),
-                ])
-            else:
-                layers.extend([
-                    nn.Linear(dim_in, dim_out),
-                ])
-        self.net = nn.Sequential(*layers)
-
-    def forward(self, x):
-        return self.net(x)
-
 class Encoder(nn.Module):
 
     def __init__(self, embed_input_dim, embed_nlayers, embed_dim, mlp_input_dim, mlp_nlayers, mlp_dim, attn_blocks_n, attn_block_num_heads, attn_block_ffwd_on, attn_block_ffwd_nlayers, attn_block_ffwd_dim, gumbel_softmax_config, out_dim, doWij, doCandidateAttention, ae_dim, ae_depth, random_mode, do_gumbel):
@@ -143,13 +131,13 @@ class Encoder(nn.Module):
         self.T = out_dim
 
         # embed, In -> Out : J,C -> J,E
-        self.embed = Embed(embed_input_dim, embed_nlayers*[embed_dim], normalize_input=True, final_layer=[embed_dim,embed_dim])
+        self.embed = DNN_block(embed_input_dim, embed_dim, [embed_input_dim] + (embed_nlayers+1)*[embed_dim], True)
 
         # position encoding based on (eta,cos(phi),sin(phi))
         self.doWij = doWij
         if self.doWij:
             # MLP for Wij
-            self.mlp = Embed(mlp_input_dim, mlp_nlayers*[mlp_dim], normalize_input=False, final_layer=[mlp_dim,1])
+            self.mlp = DNN_block(mlp_input_dim, 1, [mlp_input_dim] + mlp_nlayers*[mlp_dim] + [1], False)
 
         # object attention blocks, In -> Out : J,E -> J,E
         ffwd_dims = [[attn_block_ffwd_dim]*attn_block_ffwd_nlayers + [embed_dim]] * attn_blocks_n
@@ -166,8 +154,9 @@ class Encoder(nn.Module):
         
         # autoencoder blocks E-T+1 -> B -> E-T+1
         # drops the T jet scores from the features and adds the mass
-        self.ae_in  = AE_block(embed_dim-self.T+1, ae_dim, ae_depth)
-        self.ae_out = AE_block(ae_dim, embed_dim-self.T+1, ae_depth)
+        self.ae_in = DNN_block(embed_dim-self.T+1, ae_dim, ae_depth, False)
+        self.ae_out = DNN_block(ae_dim, embed_dim-self.T+1, ae_depth, False)
+
         self.random_mode = random_mode #FIXME cleanup
         self.do_gumbel = do_gumbel
 
