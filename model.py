@@ -46,15 +46,15 @@ class StepLightning(pl.LightningModule):
         self.log("lr", pg["lr"], prog_bar=True, on_step=True)
 
         if version == "train" and self.tau_annealing:
-            self.encoder_config["gumble_softmax_config"]["tau"] *= 1-1./self.trainer.max_steps #converges to 0.36
-            self.log("tau", self.encoder_config["gumble_softmax_config"]["tau"], prog_bar=True, on_step=True)
+            self.encoder_config["gumbel_softmax_config"]["tau"] *= 1-1./self.trainer.max_steps #converges to 0.36
+            self.log("tau", self.encoder_config["gumbel_softmax_config"]["tau"], prog_bar=True, on_step=True)
 
         # forward pass
         x = batch
-        (c1, c2, c1_out, c2_out, c1random, c2random, c1random_out, c2random_out, cp4), jet_choice = self(x)
+        (c1, c2, c1_out, c2_out, cp4), jet_choice = self(x)
 
         # compute loss
-        loss = self.loss(c1, c2, c1_out, c2_out, c1random, c2random, c1random_out, c2random_out, cp4)
+        loss = self.loss(c1, c2, c1_out, c2_out, cp4)
 
         # log the loss
         for key, val in loss.items():
@@ -66,15 +66,11 @@ class StepLightning(pl.LightningModule):
     def training_step(self, batch, batch_idx, debug=False):
         if debug and batch_idx==0:
             x = batch
-            (c1, c2, c1_out, c2_out, c1random, c2random, c1random_out, c2random_out, cp4), jet_choice = self(x)
+            (c1, c2, c1_out, c2_out, cp4), jet_choice = self(x)
             print("training step c1",c1[0])
             print("training step c2",c2[0])
             print("training step c1_out",c1_out[0])
             print("training step c2_out",c2_out[0])
-            print("training step c1random",c1random[0])
-            print("training step c2random",c2random[0])
-            print("training step c1random_out",c1random_out[0])
-            print("training step c2random_out",c2random_out[0])
             print("training step cp4",cp4[0])
             print("training step jet_choice",jet_choice[0])
         return self.step(batch, batch_idx, "train")
@@ -82,16 +78,12 @@ class StepLightning(pl.LightningModule):
     def validation_step(self, batch, batch_idx, debug=False):
         if debug and batch_idx==0:
             x = batch
-            (c1, c2, c1_out, c2_out, c1random, c2random, c1random_out, c2random_out, cp4), jet_choice = self(x)
+            (c1, c2, c1_out, c2_out, cp4), jet_choice = self(x)
             print("validation step x",x[0])
             print("validation step c1",c1[0])
             print("validation step c2",c2[0])
             print("validation step c1_out",c1_out[0])
             print("validation step c2_out",c2_out[0])
-            print("validation step c1random",c1random[0])
-            print("validation step c2random",c2random[0])
-            print("validation step c1random_out",c1random_out[0])
-            print("validation step c2random_out",c2random_out[0])
             print("validation step jet_choice",jet_choice[0])
         return self.step(batch,batch_idx, "val")
 
@@ -112,7 +104,7 @@ class StepLightning(pl.LightningModule):
             lr_scale = 0.95
             pg["lr"] = self.lr * (lr_scale**(self.trainer.global_step // N))
     
-    def loss(self, c1, c2, c1_out, c2_out, c1random, c2random, c1random_out, c2random_out, cp4):
+    def loss(self, c1, c2, c1_out, c2_out, cp4):
 
         ''' 
         cout/cin = [B, E]
