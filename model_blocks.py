@@ -132,7 +132,7 @@ class Encoder(nn.Module):
         self.doWij = doWij
         if self.doWij:
             # MLP for Wij
-            self.mlp = DNN_block(mlp_input_dim, 1, [mlp_input_dim] + mlp_nlayers*[mlp_dim] + [1], False)
+            self.mlp = DNN_block(mlp_input_dim, 1, [mlp_input_dim] + mlp_nlayers*[mlp_dim] + [1], normalize_input=False)
 
         # object attention blocks, In -> Out : J,E -> J,E
         ffwd_dims = [[attn_block_ffwd_dim]*attn_block_ffwd_nlayers + [embed_dim]] * attn_blocks_n
