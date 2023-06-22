@@ -37,11 +37,6 @@ class DNN_block(nn.Module):
 
         super().__init__()
 
-        # if user inputs int dimensions then expects a cascade of depth
-        if isinstance(dimensions, int):
-            depth = dimensions
-            dimensions = [int(output_dim + (input_dim - output_dim)*(depth-i)/depth) for i in range(depth+1)]
-
         self.input_bn = nn.BatchNorm1d(input_dim) if normalize_input else None
 
         layers = []
@@ -131,7 +126,7 @@ class Encoder(nn.Module):
         self.T = out_dim
 
         # embed, In -> Out : J,C -> J,E
-        self.embed = DNN_block(embed_input_dim, embed_dim, [embed_input_dim] + (embed_nlayers+1)*[embed_dim], True)
+        self.embed = DNN_block(embed_input_dim, embed_dim, [embed_input_dim] + (embed_nlayers+1)*[embed_dim], normalize_input=True)
 
         # position encoding based on (eta,cos(phi),sin(phi))
         self.doWij = doWij
@@ -154,8 +149,9 @@ class Encoder(nn.Module):
         
         # autoencoder blocks E-T+1 -> B -> E-T+1
         # drops the T jet scores from the features and adds the mass
-        self.ae_in = DNN_block(embed_dim-self.T+1, ae_dim, ae_depth, False)
-        self.ae_out = DNN_block(ae_dim, embed_dim-self.T+1, ae_depth, False)
+        # if user inputs int dimensions then expects a cascade of depth
+        self.ae_in = DNN_block(embed_dim-self.T+1, ae_dim, cascade_dims(embed_dim-self.T+1, ae_dim, ae_depth), normalize_input=False)
+        self.ae_out = DNN_block(ae_dim, embed_dim-self.T+1, cascade_dims(ae_dim, embed_dim-self.T+1, ae_depth), normalize_input=False)
 
         self.random_mode = random_mode #FIXME cleanup
         self.do_gumbel = do_gumbel
@@ -250,3 +246,7 @@ def ms_from_p4s(p4s):
     eps = 0.0001
     m2s = (p4s[...,0]*(1+eps))**2 - p4s[...,1]**2 - p4s[...,2]**2 - p4s[...,3]**2+eps
     return torch.sign(m2s)*torch.sqrt(torch.abs(m2s))
+
+def cascade_dims(input_dim, output_dim, depth):
+    dimensions = [int(output_dim + (input_dim - output_dim)*(depth-i)/depth) for i in range(depth+1)]
+    return dimensions
