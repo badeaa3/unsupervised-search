@@ -29,15 +29,19 @@ def cast(a, b, op="add"):
 
 class DNN_block(nn.Module):
 
-    def __init__(self, dimensions, normalize_input):
+    '''
+    Similar to the embedding block, just takes care of progressive up/down shifting of layer size
+    '''
+
+    def __init__(self, input_dim, output_dim, dimensions, normalize_input):
 
         super().__init__()
-        input_dim = dimensions[0]
+
         self.input_bn = nn.BatchNorm1d(input_dim) if normalize_input else None
 
         layers = []
         for iD, (dim_in, dim_out) in enumerate(zip(dimensions, dimensions[1:])):
-            if iD != len(dimensions[1:])-1:
+            if dim_out != output_dim or iD != len(dimensions[1:])-1:
                 layers.extend([
                     nn.Linear(dim_in, dim_out),
                     nn.LayerNorm(dim_out),
@@ -60,7 +64,7 @@ class AttnBlock(nn.Module):
     def __init__(self,
                  embed_dim = 4,
                  num_heads = 1,
-                 attn_dropout = 0.1,
+                 attn_dropout = 0.1, #FIXME
                  add_bias_kv = True,
                  kdim = None,
                  vdim = None,
@@ -114,7 +118,7 @@ class AttnBlock(nn.Module):
 
 class Encoder(nn.Module):
 
-    def __init__(self, embed_input_dim, embed_nlayers, embed_dim, mlp_input_dim, mlp_nlayers, mlp_dim, attn_blocks_n, attn_block_num_heads, attn_block_ffwd_on, attn_block_ffwd_nlayers, attn_block_ffwd_dim, gumbel_softmax_config, out_dim, doWij, ae_dim, ae_depth, do_gumbel):
+    def __init__(self, embed_input_dim, embed_nlayers, embed_dim, mlp_input_dim, mlp_nlayers, mlp_dim, attn_blocks_n, attn_block_num_heads, attn_block_ffwd_on, attn_block_ffwd_nlayers, attn_block_ffwd_dim, gumbel_softmax_config, out_dim, doWij, doCandidateAttention, ae_dim, ae_depth, random_mode, do_gumbel):
 
         super().__init__()
 
@@ -128,8 +132,7 @@ class Encoder(nn.Module):
         self.doWij = doWij
         if self.doWij:
             # MLP for Wij
-            mlp_dimensions = [mlp_input_dim] + mlp_nlayers*[mlp_dim] + [1]
-            self.mlp = DNN_block(mlp_dimensions, normalize_input=False)
+            self.mlp = DNN_block(mlp_input_dim, 1, [mlp_input_dim] + mlp_nlayers*[mlp_dim] + [1], normalize_input=False)
 
         # object attention blocks, In -> Out : J,E -> J,E
         ffwd_dims = [[attn_block_ffwd_dim]*attn_block_ffwd_nlayers + [embed_dim]] * attn_blocks_n
@@ -146,11 +149,12 @@ class Encoder(nn.Module):
         
         # autoencoder blocks E-T+1 -> B -> E-T+1
         # drops the T jet scores from the features and adds the mass
-        self.ae_in = DNN_block(cascade_dims(embed_dim-self.T+1, ae_dim, ae_depth), normalize_input=False)
-        self.ae_out = DNN_block(cascade_dims(ae_dim, embed_dim-self.T+1, ae_depth), normalize_input=False)
+        # if user inputs int dimensions then expects a cascade of depth
+        self.ae_in = DNN_block(embed_dim-self.T+1, ae_dim, cascade_dims(embed_dim-self.T+1, ae_dim, ae_depth), normalize_input=False)
+        self.ae_out = DNN_block(ae_dim, embed_dim-self.T+1, cascade_dims(ae_dim, embed_dim-self.T+1, ae_depth), normalize_input=False)
 
+        self.random_mode = random_mode #FIXME cleanup
         self.do_gumbel = do_gumbel
-        self.mass_scale = mass_scale
 
     def forward(self, x, w, mask, loss=None):
 
@@ -178,8 +182,8 @@ class Encoder(nn.Module):
             x = x.masked_fill(mask.unsqueeze(-1).repeat(1,1,x.shape[-1]).bool(), 0)
 
             # candidate attention
-            jet_choice  = self.get_jet_choice(x)
-            c = torch.bmm(jet_choice.transpose(2,1), x) # (T,J)x (J,E) -> T,E
+            cchoice  = self.get_jet_choice(x)
+            c = torch.bmm(cchoice.transpose(2,1), x) # (T,J)x (J,E) -> T,E
             c = self.cand_blocks[ib](Q=c, K=c, V=c, key_padding_mask=None, attn_mask=None) # T,E
 
             # cross attention, In -> Out : (J,E)x(E,T)x(T,E) -> J,E
@@ -188,47 +192,41 @@ class Encoder(nn.Module):
             
         #build candidate mass from original jet 4-vector
         jp4 = x_to_p4(originalx)
-        jet_choice  = self.get_jet_choice(x)
-        candidates_p4 = torch.bmm(jet_choice.transpose(2,1), jp4)
-        cmass = ms_from_p4s(candidates_p4)/self.mass_scale #arbitrary scaling factor
+        cchoice  = self.get_jet_choice(x)
+        cp4 = torch.bmm(cchoice.transpose(2,1), jp4)
+        cmass = ms_from_p4s(cp4)/100 #arbitrary scaling factor 
 
         c       = torch.cat([c[:,:,self.T:],cmass[:,:,None]],-1) #drop the category scores, add the mass
 
         #autoencoders
-        c0        = c[:,0]
-        c0_latent = self.ae_in(c0)
-        c0_out    = self.ae_out(c0_latent)
-
-        c1        = c[:,1]
+        c1        = c[:,self.T-2]
         c1_latent = self.ae_in(c1)
         c1_out    = self.ae_out(c1_latent)
 
-        loss  = get_mse(c0, c0_out) + get_mse(c1, c1_out)
-        xloss = get_mse(c0, c1_out) + get_mse(c1, c0_out)
+        c2        = c[:,self.T-1]
+        c2_latent = self.ae_in(c2)
+        c2_out    = self.ae_out(c2_latent)
 
-        return loss, xloss, c1_out, candidates_p4, jet_choice
-
-    def get_mse(in, out):
-        return torch.mean((c1_out-c1)**2 + (c2_out-c2)**2, -1)
+        return (c1, c2, c1_out, c2_out, cp4), cchoice
 
     def get_jet_choice(self,x):
         if self.T==3:
             # after initialization the jet scores for the 3 categories are similar and
             # often it collapses to predict everything ISR. By shifting before the softmax
             # it starts predicting jets in BSM candidates, and later adjusts ISR predictions
-            x[:,:,2] -= 1
+            x[:,:,0] -= 1
 
         if self.training:
             # differential but relies on probability distribution
             if self.do_gumbel:
-                jet_choice = nn.functional.gumbel_softmax(x[:,:,:self.T], dim=2, **self.gumbel_softmax_config) # J, T
+                cchoice = nn.functional.gumbel_softmax(x[:,:,:self.T], dim=2, **self.gumbel_softmax_config) # J, T
             else:
                 # divide by some temperature to make the preditions almost one-hot
-                jet_choice = nn.functional.softmax(x[:,:,:self.T]/0.1, dim=2) # J, T
+                cchoice = nn.functional.softmax(x[:,:,:self.T]/0.1, dim=2) # J, T
         else:
             # not differential but justs max per row
-            jet_choice = nn.functional.one_hot(torch.argmax(x[:,:,:self.T],dim=-1), num_classes=self.T).float() # J, T
-        return jet_choice
+            cchoice = nn.functional.one_hot(torch.argmax(x[:,:,:self.T],dim=-1), num_classes=self.T).float() # J, T
+        return cchoice
 
 def x_to_p4(x):
     pt = torch.exp(x[..., 0])
@@ -242,14 +240,12 @@ def x_to_p4(x):
 
     return torch.stack([e,px,py,pz], -1)
     
-def m2s_from_p4s(p4s, eps=1e-4):
+def ms_from_p4s(p4s):
+    ''' copied from energyflow '''
     #add some tiny energy to prevent negative masses from rounding errors
+    eps = 0.0001
     m2s = (p4s[...,0]*(1+eps))**2 - p4s[...,1]**2 - p4s[...,2]**2 - p4s[...,3]**2+eps
-    return m2s
-
-def ms_from_p4s(p4s, eps=1e-4):
-    m2s = m2s_from_p4s(p4s, eps=eps)
-    return torch.sqrt(m2s)
+    return torch.sign(m2s)*torch.sqrt(torch.abs(m2s))
 
 def cascade_dims(input_dim, output_dim, depth):
     dimensions = [int(output_dim + (input_dim - output_dim)*(depth-i)/depth) for i in range(depth+1)]
