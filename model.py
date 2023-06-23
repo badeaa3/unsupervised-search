@@ -9,7 +9,6 @@ class StepLightning(pl.LightningModule):
                  loss_config = {},
                  lr = 1e-3,
                  update_learning_rate = True,
-                 tau_annealing = True,
                  weights = None):
         super().__init__()
 
@@ -18,7 +17,6 @@ class StepLightning(pl.LightningModule):
         self.loss_config = loss_config
         self.lr = lr
         self.update_learning_rate = update_learning_rate
-        self.tau_annealing = tau_annealing
 
         # use the weights hyperparameters
         if weights: 
@@ -44,10 +42,6 @@ class StepLightning(pl.LightningModule):
             self.learning_rate_scheduler()
         pg = self.trainer.optimizers[0].param_groups[0]
         self.log("lr", pg["lr"], prog_bar=True, on_step=True)
-
-        if version == "train" and self.tau_annealing:
-            self.encoder_config["gumbel_softmax_config"]["tau"] *= 1-1./self.trainer.max_steps #converges to 0.36
-            self.log("tau", self.encoder_config["gumbel_softmax_config"]["tau"], prog_bar=True, on_step=True)
 
         # forward pass
         x = batch
