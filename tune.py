@@ -113,10 +113,12 @@ if __name__ == "__main__":
 
     # configure search space
     config = {
-        "embed_dim" : tune.choice([32, 64, 128]),
-        "attn_blocks_n" : tune.choice([4, 6, 8, 10]),
-        "lr" : 1e-3, #tune.loguniform(1e-4, 1e-1), 
-        "batch_size" : 2048, #tune.choice([1024, 2048, 4096])
+        "out_dim"   : tune.choice([2,3]),
+        "do_gumbel" : tune.choice([True,False]),
+        "energyT"   : tune.choice([True,False]),
+        "ae_dim"    : tune.choice([4, 8, 16]),
+        "scale_ISR_loss" : tune.loguniform([1e-1, 1e-2]),
+        "mass_scale" : tune.loguniform([1e0, 1e3]),
     }
 
     # make scheduler
