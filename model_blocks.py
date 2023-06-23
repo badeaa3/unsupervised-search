@@ -60,7 +60,7 @@ class AttnBlock(nn.Module):
     def __init__(self,
                  embed_dim = 4,
                  num_heads = 1,
-                 attn_dropout = 0.1, #FIXME
+                 attn_dropout = 0.1,
                  add_bias_kv = True,
                  kdim = None,
                  vdim = None,
@@ -150,6 +150,7 @@ class Encoder(nn.Module):
         self.ae_out = DNN_block(cascade_dims(ae_dim, embed_dim-self.T+1, ae_depth), normalize_input=False)
 
         self.do_gumbel = do_gumbel
+        self.mass_scale = mass_scale
 
     def forward(self, x, w, mask, loss=None):
 
@@ -177,8 +178,8 @@ class Encoder(nn.Module):
             x = x.masked_fill(mask.unsqueeze(-1).repeat(1,1,x.shape[-1]).bool(), 0)
 
             # candidate attention
-            cchoice  = self.get_jet_choice(x)
-            c = torch.bmm(cchoice.transpose(2,1), x) # (T,J)x (J,E) -> T,E
+            jet_choice  = self.get_jet_choice(x)
+            c = torch.bmm(jet_choice.transpose(2,1), x) # (T,J)x (J,E) -> T,E
             c = self.cand_blocks[ib](Q=c, K=c, V=c, key_padding_mask=None, attn_mask=None) # T,E
 
             # cross attention, In -> Out : (J,E)x(E,T)x(T,E) -> J,E
@@ -187,41 +188,47 @@ class Encoder(nn.Module):
             
         #build candidate mass from original jet 4-vector
         jp4 = x_to_p4(originalx)
-        cchoice  = self.get_jet_choice(x)
-        cp4 = torch.bmm(cchoice.transpose(2,1), jp4)
-        cmass = ms_from_p4s(cp4)/100 #arbitrary scaling factor 
+        jet_choice  = self.get_jet_choice(x)
+        candidates_p4 = torch.bmm(jet_choice.transpose(2,1), jp4)
+        cmass = ms_from_p4s(candidates_p4)/self.mass_scale #arbitrary scaling factor
 
         c       = torch.cat([c[:,:,self.T:],cmass[:,:,None]],-1) #drop the category scores, add the mass
 
         #autoencoders
-        c1        = c[:,self.T-2]
+        c0        = c[:,0]
+        c0_latent = self.ae_in(c0)
+        c0_out    = self.ae_out(c0_latent)
+
+        c1        = c[:,1]
         c1_latent = self.ae_in(c1)
         c1_out    = self.ae_out(c1_latent)
 
-        c2        = c[:,self.T-1]
-        c2_latent = self.ae_in(c2)
-        c2_out    = self.ae_out(c2_latent)
+        loss  = get_mse(c0, c0_out) + get_mse(c1, c1_out)
+        xloss = get_mse(c0, c1_out) + get_mse(c1, c0_out)
 
-        return (c1, c2, c1_out, c2_out, cp4), cchoice
+        return loss, xloss, c1_out, candidates_p4, jet_choice
+
+    def get_mse(in, out):
+        return torch.mean((c1_out-c1)**2 + (c2_out-c2)**2, -1)
 
     def get_jet_choice(self,x):
         if self.T==3:
             # after initialization the jet scores for the 3 categories are similar and
             # often it collapses to predict everything ISR. By shifting before the softmax
             # it starts predicting jets in BSM candidates, and later adjusts ISR predictions
-            x[:,:,0] -= 1
+            x[:,:,2] -= 1
 
         if self.training:
             # differential but relies on probability distribution
             if self.do_gumbel:
-                cchoice = nn.functional.gumbel_softmax(x[:,:,:self.T], dim=2, **self.gumbel_softmax_config) # J, T
+                jet_choice = nn.functional.gumbel_softmax(x[:,:,:self.T], dim=2, **self.gumbel_softmax_config) # J, T
             else:
                 # divide by some temperature to make the preditions almost one-hot
-                cchoice = nn.functional.softmax(x[:,:,:self.T]/0.1, dim=2) # J, T
+                jet_choice = nn.functional.softmax(x[:,:,:self.T]/0.1, dim=2) # J, T
         else:
             # not differential but justs max per row
-            cchoice = nn.functional.one_hot(torch.argmax(x[:,:,:self.T],dim=-1), num_classes=self.T).float() # J, T
-        return cchoice
+            jet_choice = nn.functional.one_hot(torch.argmax(x[:,:,:self.T],dim=-1), num_classes=self.T).float() # J, T
+        return jet_choice
 
 def x_to_p4(x):
     pt = torch.exp(x[..., 0])
@@ -235,12 +242,14 @@ def x_to_p4(x):
 
     return torch.stack([e,px,py,pz], -1)
     
-def ms_from_p4s(p4s):
-    ''' copied from energyflow '''
+def m2s_from_p4s(p4s, eps=1e-4):
     #add some tiny energy to prevent negative masses from rounding errors
-    eps = 0.0001
     m2s = (p4s[...,0]*(1+eps))**2 - p4s[...,1]**2 - p4s[...,2]**2 - p4s[...,3]**2+eps
-    return torch.sign(m2s)*torch.sqrt(torch.abs(m2s))
+    return m2s
+
+def ms_from_p4s(p4s, eps=1e-4):
+    m2s = m2s_from_p4s(p4s, eps=eps)
+    return torch.sqrt(m2s)
 
 def cascade_dims(input_dim, output_dim, depth):
     dimensions = [int(output_dim + (input_dim - output_dim)*(depth-i)/depth) for i in range(depth+1)]
