@@ -21,7 +21,7 @@
       },
       "doWij" : true,
       "ae_dim" : 4,
-      "ae_depth" : 4,
+      "ae_depth" : 4
     },
     "loss_config": {
       "scale_ISR_loss": 0.05

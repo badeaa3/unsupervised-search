@@ -36,8 +36,8 @@ class StepLightning(pl.LightningModule):
 
         # create padding mask with True where padded
         mask = (x[:,:,0] == 0).bool()
-        ae_out, jet_choice = self.Encoder(x, w, mask)
-        return ae_out, jet_choice
+        loss, xloss, candidates_p4, jet_choice = self.Encoder(x, w, mask)
+        return loss, xloss, candidates_p4, jet_choice
         
     def step(self, batch, batch_idx, version):
         

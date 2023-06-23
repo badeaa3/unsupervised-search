@@ -114,7 +114,7 @@ class AttnBlock(nn.Module):
 
 class Encoder(nn.Module):
 
-    def __init__(self, embed_input_dim, embed_nlayers, embed_dim, mlp_input_dim, mlp_nlayers, mlp_dim, attn_blocks_n, attn_block_num_heads, attn_block_ffwd_on, attn_block_ffwd_nlayers, attn_block_ffwd_dim, gumbel_softmax_config, out_dim, doWij, ae_dim, ae_depth, do_gumbel):
+    def __init__(self, embed_input_dim, embed_nlayers, embed_dim, mlp_input_dim, mlp_nlayers, mlp_dim, attn_blocks_n, attn_block_num_heads, attn_block_ffwd_on, attn_block_ffwd_nlayers, attn_block_ffwd_dim, gumbel_softmax_config, out_dim, doWij, ae_dim, ae_depth, do_gumbel, mass_scale):
 
         super().__init__()
 
@@ -122,7 +122,7 @@ class Encoder(nn.Module):
         self.T = out_dim
 
         # embed, In -> Out : J,C -> J,E
-        self.embed = DNN_block(embed_input_dim, embed_dim, [embed_input_dim] + (embed_nlayers+1)*[embed_dim], normalize_input=True)
+        self.embed = DNN_block([embed_input_dim] + (embed_nlayers+1)*[embed_dim], normalize_input=True)
 
         # position encoding based on (eta,cos(phi),sin(phi))
         self.doWij = doWij
@@ -206,10 +206,7 @@ class Encoder(nn.Module):
         loss  = get_mse(c0, c0_out) + get_mse(c1, c1_out)
         xloss = get_mse(c0, c1_out) + get_mse(c1, c0_out)
 
-        return loss, xloss, c1_out, candidates_p4, jet_choice
-
-    def get_mse(in, out):
-        return torch.mean((c1_out-c1)**2 + (c2_out-c2)**2, -1)
+        return loss, xloss, candidates_p4, jet_choice
 
     def get_jet_choice(self,x):
         if self.T==3:
@@ -254,3 +251,6 @@ def ms_from_p4s(p4s, eps=1e-4):
 def cascade_dims(input_dim, output_dim, depth):
     dimensions = [int(output_dim + (input_dim - output_dim)*(depth-i)/depth) for i in range(depth+1)]
     return dimensions
+
+def get_mse(xin, xout):
+    return torch.mean((xin-xout)**2, -1)
