@@ -58,7 +58,7 @@ def evaluate(config):
             start, end = i*ops.batch_size, (i+1)*ops.batch_size
             # be careful about the memory transfers to not use all gpu memory
             temp = x[start:end].to(config["device"])
-            ae_out, jet_choice, scores, interm_masses = model(temp)
+            loss, xloss, candidates_p4, jet_choice = model(temp)
             c1, c2, c1_out, c2_out, c1random, c2random, c1random_out, c2random_out, cp4 = ae_out
             c1, c2, c1_out, c2_out = c1.cpu(), c2.cpu(), c1_out.cpu(), c2_out.cpu()
             jet_choice = jet_choice.cpu()

@@ -48,8 +48,8 @@ class StepLightning(pl.LightningModule):
         self.log("lr", pg["lr"], prog_bar=True, on_step=True)
 
         if version == "train" and self.tau_annealing:
-            self.encoder_config["gumble_softmax_config"]["tau"] *= 1-1./self.trainer.max_steps #converges to 0.36*original tau
-            self.log("tau", self.encoder_config["gumble_softmax_config"]["tau"], prog_bar=True, on_step=True)
+            self.encoder_config["gumbel_softmax_config"]["tau"] *= 1-1./self.trainer.max_steps #converges to 0.36*original tau
+            self.log("tau", self.encoder_config["gumbel_softmax_config"]["tau"], prog_bar=True, on_step=True)
 
         # forward pass
         x = batch

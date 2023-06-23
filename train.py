@@ -69,6 +69,7 @@ if __name__ == "__main__":
     # callbacks
     callbacks = [
         ModelCheckpoint(monitor="train_loss", dirpath=checkpoint_dir, filename='cp-{epoch:04d}-{step}', every_n_train_steps = 1, save_top_k=20), # 0=no models, -1=all models, N=n models, set save_top_k=-1 to save all checkpoints
+        EarlyStopping(monitor="val_loss", patience=3),
     ]
 
     # torch lightning trainer
