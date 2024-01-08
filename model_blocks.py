@@ -308,8 +308,9 @@ class Encoder(nn.Module):
         latent_mse = torch.stack(latent_mse , -1)
         rand_crossed = torch.stack(rand_crossed , -1)
         
-        return loss, mu_logvar, loss_infoNCE, 0, candidates_p4, jet_choice, (masses, c0, c1, c0_latent_rep, c1_latent_rep, c0_out, c1_out)
         return loss, mu_logvar, latent_mse, rand_crossed, candidates_p4, jet_choice, (masses, c0, c1, c0_latent_rep, c1_latent_rep, c0_out, c1_out)
+        #Use InfoNCE loss
+        #return loss, mu_logvar, loss_infoNCE, 0, candidates_p4, jet_choice, (masses, c0, c1, c0_latent_rep, c1_latent_rep, c0_out, c1_out)
 
     def build_candidates(self, x, originalx, mask, thisT, simple=False, addefc=False, addefp=False, random=False):
         #build candidate mass from original jet 4-vector
