@@ -11,7 +11,8 @@ import argparse
 # Load data in agreed upon format
 def loadDataFromH5(
         inFile, 
-        normWeights=False
+        normWeights=False,
+        labels=False
 ):
     with h5py.File(inFile, "r") as f:
 
@@ -29,15 +30,22 @@ def loadDataFromH5(
         phi = np.array(f['source']['phi'])
         # eta
         eta = np.array(f['source']['eta'])
+
+        #mask = pt<50
+        #e[mask], pt[mask], phi[mask], eta[mask] = 0,0,0,0
         #selection cuts
         njet = np.sum(e>0,-1)
-        cuts = njet >=6
+        cuts = njet >= 6
         # stack
         X = np.stack([pt,eta,np.cos(phi),np.sin(phi),e],-1)
         X = X[cuts]
         X = torch.Tensor(X)
 
-        if normWeights:
+        if labels:
+            l = np.array(f['source']['label'])
+            l = l[cuts]
+            X = (X,l)
+        elif normWeights:
             w = np.array(f['EventVars']['normweight'])
             w = w[cuts]
             X = (X,w)

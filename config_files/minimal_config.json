@@ -2,34 +2,44 @@
   "model": {
     "encoder_config": {
       "embed_input_dim": 5,
-      "embed_dim": 8,
+      "embed_dim": 32,
       "embed_nlayers": 3,
       "mlp_input_dim": 3,
-      "mlp_dim": 8,
+      "mlp_dim": 32,
       "mlp_nlayers": 3,
-      "attn_blocks_n": 2,
-      "attn_block_num_heads": 2,
+      "attn_blocks_n": 1,
+      "attn_block_num_heads": 4,
       "attn_block_ffwd_on": true,
       "attn_block_ffwd_nlayers": 3,
-      "attn_block_ffwd_dim": 8,
-      "out_dim": 3,
+      "attn_block_ffwd_dim": 32,
+      "out_dim": 2,
+      "mass_scale": 200,
       "do_gumbel": false,
+      "do_vae": false,
+      "add_mass_feature": true,
+      "add_mass_latent": false,
+      "sync_rand": false,
+      "over_jet_count": true,
+      "random_mode": "reverse_both",
+      "rand_cross_candidates": true,
       "gumbel_softmax_config": {
         "tau": 1,
-        "hard": false
+        "hard": true
       },
       "doWij" : true,
-      "ae_dim" : 4,
-      "ae_depth" : 2,
-      "doCandidateAttention" : true,
-      "random_mode" : "A"
+      "ae_dim" : 2,
+      "ae_depth" : 4
     },
     "loss_config": {
+      "scale_reco_loss": 1,
+      "scale_ISR_loss": 0.1,
       "scale_random_loss": 0.1,
-      "scale_ISR_loss": 0.05
+      "scale_latent_loss": 0.1,
+      "scale_kld_loss": 0.1
     },
     "weights": false,
     "lr": 0.001,
+    "L2": 1e-3,
     "update_learning_rate": true,
     "tau_annealing": true
   },

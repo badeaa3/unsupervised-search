@@ -34,7 +34,7 @@ def get_binning(var, center=False):
     if var.startswith("m"):
         bins= np.linspace(0,4000,51)
     else:
-        bins= np.linspace(-1,3,1001)
+        bins= np.linspace(-2,6,1001)
     if center:
         bins = (bins[:-1]+bins[1:])/2
     return bins
@@ -44,12 +44,17 @@ def evaluate( config):
     ''' perform the full model evaluation '''
     
     # load model
-    model = StepLightning(**config["model"])
+    try:
+        model = StepLightning(**config["model"])
+    except RuntimeError:
+        print("Could not load {config}")
+        return {}
     model.to(config["device"])
     model.eval()
     model.Encoder.eval()
 
     histograms = {}
+    scalars = {}
     for sample, x in config["inputs"].items():
         print(f"evaluating on {sample}")
         mask = (x[:,:,0] == 0)
@@ -58,23 +63,32 @@ def evaluate( config):
         with torch.no_grad():
 
             # make predictions
-            _loss, _xloss, _candidates_p4, _jet_choice = [], [], [], []
+            _loss, _xloss, _candidates_p4, _jet_choice, _masses, _z = [], [], [], [], [], []
             niters = int(np.ceil(x.shape[0]/ops.batch_size))
             for i in tqdm(range(niters)):
                 start, end = i*ops.batch_size, (i+1)*ops.batch_size
                 # be careful about the memory transfers to not use all gpu memory
                 temp = x[start:end].to(config["device"])
-                loss, xloss, candidates_p4, jet_choice = model(temp)
+                loss, mu_logvar, xloss, randloss, candidates_p4, jet_choice, (masses, a,b,z0,z1,e,f) = model(temp)
                 _loss.append(loss)
                 _xloss.append(xloss)
                 _candidates_p4.append(candidates_p4)
                 _jet_choice.append(jet_choice)
+                _masses.append(masses)
+                z = torch.stack([z0,z1],dim=1)
+                _z.append(z)
+                scalars[sample] = model.loss(loss, mu_logvar, xloss, randloss, candidates_p4, jet_choice)
+            scalars[sample] = {k:v.item() for k,v in scalars[sample].items()}
+            print(scalars[sample])
 
             # concat
+            masses = torch.concat(_masses).cpu()
             loss = torch.concat(_loss).cpu()
             xloss = torch.concat(_xloss).cpu()
             jet_choice = torch.concat(_jet_choice).cpu()
             candidates_p4 = torch.concat(_candidates_p4).cpu()
+            z = torch.concat(_z).cpu()
+            print(z.shape)
             
             # convert x
             x = x_to_p4(x)
@@ -86,7 +100,9 @@ def evaluate( config):
             m0   = pmom_max[:,-1,3]
             mavg = (m1+m2)/2
             mdiff = np.abs(m1-m2)/2
-                    
+            #a,b = np.max(np.log(loss.numpy())), np.min(np.log(loss.numpy()))
+            #print(f"Loss range: {a} {b}")
+            interm_mavg = (masses[:,0]+masses[:,1])/2
             histograms[sample] = {
               "m0"    : np.histogram(m0, bins=get_binning("m0")),
               "m1"    : np.histogram(m1, bins=get_binning("m1")),
@@ -97,9 +113,20 @@ def evaluate( config):
               "loss"    : np.histogram(np.log(loss), bins=get_binning("loss")),
               "xloss"   : np.histogram(np.log(xloss), bins=get_binning("xloss")),
             }
+            for i in range(interm_mavg.shape[-1]):
+                 histograms[sample][f"mavg_i{i}"] = np.histogram(interm_mavg[:,i], bins=get_binning("mavg"))
             histograms[sample] = {k:h for k,(h,bins) in histograms[sample].items()} #drop bin ranges
+            scalars[sample].update({
+                 'corr_g0_z0_mavg': np.corrcoef(z[:,0,0],mavg)[0,1],
+                 'corr_g1_z0_mavg': np.corrcoef(z[:,1,0],mavg)[0,1],
+                 'corr_g0_z1_mavg': np.corrcoef(z[:,0,1],mavg)[0,1],
+                 'corr_g1_z1_mavg': np.corrcoef(z[:,1,1],mavg)[0,1],
+                 'corr_gavg_z0_mavg': np.corrcoef(z[:,0,0]+z[:,1,0],mavg)[0,1],
+                 'corr_gavg_z1_mavg': np.corrcoef(z[:,1,0]+z[:,1,1],mavg)[0,1],
+            })
+            scalars[sample]['corr_max_z_mavg'] = max([abs(v) for k,v in scalars[sample].items() if 'corr_g' in k])
 
-    return histograms
+    return histograms, scalars
 
 
 
@@ -111,10 +138,12 @@ def get_auc(hsig, hbkg):
 
 def get_aggregate(metrics):
     metrics = {k:v['avg'] for k, v in metrics.items()}
+    #metrics = {k:v['avg'] if hasattr(v, '__iter__') else v for k, v in metrics.items()}
     if any(isnan(v) for v in metrics.values()):
         return 0
     separation =['loss','xloss']
     agg = max([metrics[k] for k in separation])
+    agg += metrics['corr_max_z_mavg']
     agg += metrics['mavg']/2
     agg -= metrics['mdiff']/1000
     return agg
@@ -126,14 +155,17 @@ def get_outfile(weightfile, big=False, h5=False):
     return weightfile+tag+'summary.json'
 
 def get_truemean(sample, mean):
-    if "1100" in sample: return 1100
-    if "1500" in sample: return 1500
-    if "1900" in sample: return 1900
+    if "2500" in sample: return 2500
     if "2300" in sample: return 2300
+    if "2000" in sample: return 2000
+    if "1900" in sample: return 1900
+    if "1500" in sample: return 1500
+    if "1100" in sample: return 1100
     return mean
 
-def summarize(outData, weightfile):
+def summarize(outputs, weightfile):
 
+    outData,scalars = outputs
     metrics = {}
     for var in outData['bkg'].keys():
         histos = {}
@@ -157,6 +189,13 @@ def summarize(outData, weightfile):
             for sample in outData.keys():
                 if sample == 'bkg': continue
                 metrics[var][sample] = get_auc(histos[sample],histos['bkg'])
+        metrics[var]['avg'] = sum(metrics[var].values())/len(metrics[var])
+    for var in scalars['bkg'].keys():
+        if var in metrics: continue #avoid overwriting loss AUC with loss value
+        histos = {}
+        metrics[var] = {}
+        for sample in scalars.keys():
+            metrics[var][sample] = scalars[sample][var]
         metrics[var]['avg'] = sum(metrics[var].values())/len(metrics[var])
     metrics['aggregate'] = get_aggregate(metrics)
 
@@ -220,7 +259,9 @@ if __name__ == "__main__":
             if ops.config_file.endswith("yaml"):
                 model_config["model"] = yaml.load(fp, Loader=yaml.Loader)
                 if 'lightning_logs' in ops.config_file:
-                    model_config['model']['encoder_config']['do_gumbel'] = True
+                    if 'do_vae' not in model_config['model']['encoder_config']:
+                        model_config['model']['encoder_config']['do_vae'] = False
+                    model_config['model']['encoder_config']['do_gumbel'] = False
                     model_config['model']['encoder_config']['mass_scale'] = 100
             else:
                 model_config = json.load(fp)
@@ -235,5 +276,11 @@ if __name__ == "__main__":
             **model_config
         }
         outputs = evaluate(config)
+        #try:
+        #    outputs = evaluate(config)
+        #except:
+        #    print("Caught exception")
+        #    continue
+        if not outputs: continue
 
         summarize(outputs, weight)

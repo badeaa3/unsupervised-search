@@ -4,7 +4,7 @@ def get_mass_max(x, p):
 
     # indices and set pad to ISR
     ap = p.argmax(2)
-    ap[p.sum(-1)==0] = 2
+    #ap[p.sum(-1)==0] = 2
     a = np.eye(p.shape[2])[ap]
     mom = np.matmul(a.transpose(0,2,1),x) # basis is (E,px,py,pz)
     # convert to pt, eta, phi, m
