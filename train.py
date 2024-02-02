@@ -80,7 +80,7 @@ if __name__ == "__main__":
         os.makedirs(checkpoint_dir)
 
     # create model
-    model = StepLightning(device=device, **config["model"])
+    model = StepLightning(device="cuda" if device == "gpu" else "cpu", **config["model"])
     #model = torch.compile(model) # ready for pytorch 2.0 once it's more stable
 
     # callbacks
