@@ -11,6 +11,7 @@ import numpy as np
 import os
 import h5py
 import json
+import yaml
 import glob
 from tqdm import tqdm 
 from model_blocks import x_to_p4
@@ -42,8 +43,10 @@ def evaluate(config):
     model.Encoder.eval()
 
     # load data
-    x = loadDataFromH5(config["inFileName"], ops.normWeights)
-    if ops.normWeights:
+    x = loadDataFromH5(config["inFileName"], ops.normWeights, ops.labels)
+    if ops.labels:
+        x, l = x
+    elif ops.normWeights:
         x, w = x
     mask = (x[:,:,0] == 0)
     
@@ -52,55 +55,52 @@ def evaluate(config):
     with torch.no_grad():
 
         # make predictions
-        p, ae = [], []
+        _loss, _prez, _z, _xloss, _candidates_p4, _jet_choice = [], [], [], [], [], []
         niters = int(np.ceil(x.shape[0]/ops.batch_size))
         for i in tqdm(range(niters)):
             start, end = i*ops.batch_size, (i+1)*ops.batch_size
             # be careful about the memory transfers to not use all gpu memory
             temp = x[start:end].to(config["device"])
-            ae_out, jet_choice, scores, interm_masses = model(temp)
-            c1, c2, c1_out, c2_out, c1random, c2random, c1random_out, c2random_out, cp4 = ae_out
-            c1, c2, c1_out, c2_out = c1.cpu(), c2.cpu(), c1_out.cpu(), c2_out.cpu()
-            jet_choice = jet_choice.cpu()
-            ae.append(torch.stack([c1, c2, c1_out, c2_out],-1))
-            p.append(jet_choice)
+            loss, mu_logvar, xloss, _, candidates_p4, jet_choice, masses = model(temp)
+            masses, a,b,z0,z1,e,f = masses
+            _prez.append(mu_logvar)
+            z = torch.stack([z0,z1],dim=1)
+            _z.append(z)
+            _loss.append(loss)
+            _xloss.append(xloss)
+            _candidates_p4.append(candidates_p4)
+            _jet_choice.append(jet_choice)
 
         # concat
-        p = torch.concat(p)
-        ae = torch.concat(ae)
-        c1, c2, c1_out, c2_out = [ae[:,i] for i in range(4)]
-        mse_loss = torch.mean((c1_out-c1)**2 + (c2_out-c2)**2,-1)
-        mse_crossed_loss = torch.mean((c1_out-c2)**2 + (c2_out-c1)**2,-1)
+        prez = torch.concat(_prez).cpu()
+        z = torch.concat(_z).cpu()
+        loss = torch.concat(_loss).cpu()
+        xloss = torch.concat(_xloss).cpu()
+        jet_choice = torch.concat(_jet_choice).cpu()
+        candidates_p4 = torch.concat(_candidates_p4).cpu()
         
         # convert x
         x = x_to_p4(x)
         # apply mask to x
         x = x.masked_fill(mask.unsqueeze(-1).repeat(1,1,x.shape[-1]).bool(), 0)
-        pmom_max, pidx_max = get_mass_max(x, p)
-                
+        pmom_max, pidx_max = get_mass_max(x, jet_choice)
+
         # make output
         outData = {
-            "loss": mse_loss.numpy(), # raw prediction
-            "loss_crossed": mse_crossed_loss.numpy(), # raw prediction
-            "pred": p.numpy(), # raw prediction
-            "jet_p4": x.numpy(), # raw jets
-            "pred_jet_assignments_max" : pidx_max.numpy(), # interpreted prediction to jet assignments with max per jet
-            "pred_ptetaphim_max" : pmom_max.cpu().numpy(), # predicted 4-mom (pt,eta,phi,m)
+            "jet_p4": x, # raw jets
+            "prez": prez[...,-1], # MSE reco z
+            "z": z, # MSE reco z
+            "loss": loss[...,-1], # MSE reco loss
+            "loss_crossed": xloss[...,-1], # MSE crossed reco loss
+            "pred": jet_choice, # soft jet scores
+            "pred_jet_assignments_max" : pidx_max, # interpreted prediction to jet assignments with max per jet
+            "pred_ptetaphim_max" : pmom_max, # predicted 4-mom (pt,eta,phi,m)
         }
+        if ops.labels:
+            outData['labels'] = l
         if ops.normWeights:
             outData['normweight'] = w
         
-        # if truth labels then do y
-        if not ops.noTruthLabels:
-            y = y.cpu()
-            # convert y to one-hot and get mass
-            ymass = y[:,:-2].numpy().astype(int)
-            n_values = np.max(ymass) + 1
-            ymass = torch.Tensor(np.eye(n_values)[ymass])
-            ymom, yidx = get_mass_max(x, ymass)
-            outData["target_jet_assignments"] = y[:,:-2].cpu().numpy() # target jet assignments
-            outData["target_ptetaphim"] = ymom.cpu().numpy() # target 4-mom
-
     # save final file
     print(f"Saving to {config['outFileName']}")
     with h5py.File(config['outFileName'], 'w') as hf:
@@ -117,11 +117,12 @@ def options():
     parser.add_argument("-j",  "--ncpu", help="Number of cores to use for multiprocessing. If not provided multiprocessing not done.", default=1, type=int)
     parser.add_argument("-w",  "--weights", help="Pretrained weights to evaluate with.", default=None, required=True)
     parser.add_argument("--normWeights",action="store_true", help="Store also normalization weights")
+    parser.add_argument("--labels",action="store_true", help="Store also sum of labels")
     parser.add_argument("-b", "--batch_size", help="Batch size", default=10**5, type=int)
     parser.add_argument('--event_selection', default="", help="Enable event selection in batcher.")
     parser.add_argument('--doOverwrite', action="store_true", help="Overwrite already existing files.")
-    parser.add_argument('--noTruthLabels', action="store_true", help="Option to tell data loader that the file does not contain truth labels")
     parser.add_argument('--gpu', action="store_true", help="Run evaluation on gpu.")
+    parser.add_argument('--noMassLoss', action="store_true", help="Remove mass from loss")
     return parser.parse_args()
  
 if __name__ == "__main__":
@@ -149,7 +150,36 @@ if __name__ == "__main__":
     # pick up model configurations
     print(f"Using configuration file: {ops.config_file}")
     with open(ops.config_file, 'r') as fp:
-        model_config = json.load(fp)
+        if ops.config_file.endswith("yaml"):
+            model_config = {
+                       "batcher": {
+                         "minCparam": 0,
+                         "minNjetsAbovePtCut": 0,
+                         "minNjets": 0,
+                         "split": [
+                           0.9,
+                           0.1,
+                           0.0
+                         ],
+                         "reweight": 0,
+                         "eventSelection": "",
+                         "teacher": False
+                       },
+                       "trainer": {
+                         "precision": 32,
+                         "gradient_clip_val": 0.1
+                       },
+                       "batch_size": 2048
+                     }
+            model_config = {}
+            model_config["model"] = yaml.load(fp, Loader=yaml.Loader)
+            #if 'lightning_logs' in ops.config_file:
+            #    model_config['model']['encoder_config']['do_gumbel'] = True
+            #    model_config['model']['encoder_config']['mass_scale'] = 100
+        else:
+            model_config = json.load(fp)
+    if ops.noMassLoss:
+            model_config["model"]["encoder_config"]["remove_mass_from_loss"] = True
 
     # understand device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') if ops.gpu else "cpu"

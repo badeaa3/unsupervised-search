@@ -4,14 +4,15 @@ def get_mass_max(x, p):
 
     # indices and set pad to ISR
     ap = p.argmax(2)
-    ap[p.sum(-1)==0] = 2
+    #ap[p.sum(-1)==0] = 2
     a = np.eye(p.shape[2])[ap]
     mom = np.matmul(a.transpose(0,2,1),x) # basis is (E,px,py,pz)
     # convert to pt, eta, phi, m
     pt = np.sqrt(mom[:,:,1]**2 + mom[:,:,2]**2) # pt = sqrt(px^2 + py^2)
     eta = np.arcsinh(mom[:,:,3]/pt) # pz = pt sinh(eta)
     phi = np.arctan2(mom[:,:,2],mom[:,:,1]) # py/px = tan(phi)
-    m = np.sqrt(mom[:,:,0]**2 - mom[:,:,1]**2 - mom[:,:,2]**2 - mom[:,:,3]**2) # e^2 = m^2 + p^2
+    eps = 0.0001
+    m = np.sqrt((mom[:,:,0]*(1+eps))**2 - mom[:,:,1]**2 - mom[:,:,2]**2 - mom[:,:,3]**2+eps) # e^2 = m^2 + p^2
     mom = torch.stack([pt,eta,phi,m],-1)
     # fix the padded to be ap=-1
     ap[x[:,:,0]==0]=-1
