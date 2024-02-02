@@ -13,10 +13,11 @@ class StepLightning(pl.LightningModule):
                  update_learning_rate = True,
                  tau_annealing = True,
                  weights = None,
-		 L2=0):
+		 L2=0,
+                 device="cpu"):
         super().__init__()
 
-        self.Encoder = model_blocks.Encoder(**encoder_config)
+        self.Encoder = model_blocks.Encoder(device=device, **encoder_config)
         self.encoder_config = encoder_config
         self.loss_config = loss_config
         self.lr = lr

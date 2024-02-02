@@ -5,9 +5,6 @@ from info_nce import InfoNCE
 #import energyflow_torch as ef_torch
 #efset = ef_torch.EFPSet('d<=3')
 
-device = "cuda:0"
-device = "cpu"
-
 #%%%%%%% Helper Functions %%%%%%%%#
 
 def pairwise(x):
@@ -130,7 +127,7 @@ class AttnBlock(nn.Module):
 
 class Encoder(nn.Module):
 
-    def __init__(self, embed_input_dim, embed_nlayers, embed_dim, mlp_input_dim, mlp_nlayers, mlp_dim, attn_blocks_n, attn_block_num_heads, attn_block_ffwd_on, attn_block_ffwd_nlayers, attn_block_ffwd_dim, gumbel_softmax_config, out_dim, doWij, ae_dim, ae_depth, do_gumbel, mass_scale, do_vae=False, add_mass_feature=True, add_mass_latent=False, sync_rand=False, over_jet_count=True, random_mode=False, rand_cross_candidates=True, remove_mass_from_loss=False):
+    def __init__(self, embed_input_dim, embed_nlayers, embed_dim, mlp_input_dim, mlp_nlayers, mlp_dim, attn_blocks_n, attn_block_num_heads, attn_block_ffwd_on, attn_block_ffwd_nlayers, attn_block_ffwd_dim, gumbel_softmax_config, out_dim, doWij, ae_dim, ae_depth, do_gumbel, mass_scale, do_vae=False, add_mass_feature=True, add_mass_latent=False, sync_rand=False, over_jet_count=True, random_mode=False, rand_cross_candidates=True, remove_mass_from_loss=False, device="cpu"):
 
         super().__init__()
 
@@ -187,7 +184,9 @@ class Encoder(nn.Module):
         self.remove_mass_from_loss = remove_mass_from_loss
         self.infoNCE = InfoNCE(negative_mode='paired')
 
+        self.device = device
 
+        
     def reparameterize(self, x1, x2, sync=False):
         split_size = x1.shape[-1]//2
         mu1 = x1[...,:split_size]
@@ -401,7 +400,7 @@ class Encoder(nn.Module):
         if random_mode == 'shuffle6':
             # reshuffle the 6 leading predictions
             indices = torch.argsort(torch.rand((nbatch, cut)), dim=-1)
-            indices = torch.cat([indices, torch.arange(cut,njet).repeat(nbatch,1)],-1).type(torch.int64).to(device)
+            indices = torch.cat([indices, torch.arange(cut,njet).repeat(nbatch,1)],-1).type(torch.int64).to(self.device)
             indices = indices[:,:,None].repeat(1,1,thisT)
             randomchoice = torch.gather(cchoice, dim=1, index=indices)
             return randomchoice
@@ -409,17 +408,17 @@ class Encoder(nn.Module):
         if random_mode == 'reverse_scores':
             # resverse some of the scores
             indices = torch.argsort(torch.rand((nbatch, cut, thisT)), dim=-1)
-            indices = torch.cat([indices, torch.arange(thisT).repeat(nbatch,njet-cut,1)],1).type(torch.int64).to(device)
+            indices = torch.cat([indices, torch.arange(thisT).repeat(nbatch,njet-cut,1)],1).type(torch.int64).to(self.device)
             randomchoice = torch.gather(cchoice, dim=2, index=indices)
             return randomchoice
 
         if random_mode == 'reverse_both':
             rowindices = torch.argsort(torch.rand((nbatch, cut)), dim=-1)
-            rowindices = torch.cat([rowindices, torch.arange(cut,njet).repeat(nbatch,1)],-1).type(torch.int64).to(device)
+            rowindices = torch.cat([rowindices, torch.arange(cut,njet).repeat(nbatch,1)],-1).type(torch.int64).to(self.device)
             rowindices = rowindices[:,:,None].repeat(1,1,thisT)
             randomchoice = torch.gather(cchoice, dim=1, index=rowindices)
             scoreindices = torch.argsort(torch.rand((nbatch, cut, thisT)), dim=-1)
-            scoreindices = torch.cat([scoreindices, torch.arange(thisT).repeat(nbatch,njet-cut,1)],1).type(torch.int64).to(device)
+            scoreindices = torch.cat([scoreindices, torch.arange(thisT).repeat(nbatch,njet-cut,1)],1).type(torch.int64).to(self.device)
             randomchoice = torch.gather(randomchoice, dim=2, index=scoreindices)
             return randomchoice
         print("random_mode not known",random_mode)
