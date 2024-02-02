@@ -1,8 +1,8 @@
 # Paper details
-Title: A data-driven and model-agnostic approach to solving combinatorial assignment problems in searches for new physics
-Authors: Anthony Badea, Javier Montejo Berlingen
-arxiv: https://arxiv.org/abs/2309.05728
-PRD: https://journals.aps.org/search
+Title: A data-driven and model-agnostic approach to solving combinatorial assignment problems in searches for new physics \
+Authors: Anthony Badea, Javier Montejo Berlingen \
+arxiv: https://arxiv.org/abs/2309.05728 \ 
+PRD: https://journals.aps.org/search \
 
 # How to reproduce results
 ```
