@@ -1,0 +1,52 @@
+{
+  "model": {
+    "encoder_config": {
+      "embed_input_dim": 5,
+      "embed_dim": 32,
+      "embed_nlayers": 3,
+      "mlp_input_dim": 3,
+      "mlp_dim": 32,
+      "mlp_nlayers": 3,
+      "attn_blocks_n": 4,
+      "attn_block_num_heads": 4,
+      "attn_block_ffwd_on": true,
+      "attn_block_ffwd_nlayers": 3,
+      "attn_block_ffwd_dim": 32,
+      "out_dim": 2,
+      "mass_scale": 100,
+      "do_gumbel": false,
+      "gumbel_softmax_config": {
+        "tau": 1,
+        "hard": true
+      },
+      "doWij" : true,
+      "ae_dim" : 4,
+      "ae_depth" : 4
+    },
+    "loss_config": {
+      "scale_ISR_loss": 0.05
+    },
+    "weights": false,
+    "lr": 0.001,
+    "update_learning_rate": true,
+    "tau_annealing": true
+  },
+  "batcher": {
+    "minCparam": 0,
+    "minNjetsAbovePtCut": 0,
+    "minNjets": 0,
+    "split": [
+      0.9,
+      0.1,
+      0.0
+    ],
+    "reweight": 0,
+    "eventSelection": "",
+    "teacher": false
+  },
+  "trainer": {
+    "precision": 32,
+    "gradient_clip_val": 0.1
+  },
+  "batch_size": 2048
+}
