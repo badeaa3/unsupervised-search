@@ -3,6 +3,12 @@ import pytorch_lightning as pl
 import model_blocks 
 from model_blocks import m2s_from_p4s
 
+import numpy as np
+from matplotlib import pyplot as plt
+import io
+from PIL import Image
+import torchvision
+
 class StepLightning(pl.LightningModule):
 
     def __init__(self,
@@ -28,6 +34,13 @@ class StepLightning(pl.LightningModule):
             self.load_state_dict(ckpt["state_dict"])
         
         self.save_hyperparameters()
+
+        # store recent performance in validation step
+        self._recent_perf = {
+            'm0': [],
+            'm1': [],
+            'loss': [],
+        }
 
     def forward(self, x):
 
@@ -62,6 +75,12 @@ class StepLightning(pl.LightningModule):
         for key, val in loss.items():
             self.log(f"{version}_{key}", val, prog_bar=(key=="loss"), on_step=True)
         
+        # log the performance
+        if version == "val":
+            m2s = m2s_from_p4s(candidates_p4)
+            self._recent_perf['m0'].append(m2s[:,0].sqrt().detach().cpu().numpy())
+            self._recent_perf['m1'].append(m2s[:,1].sqrt().detach().cpu().numpy())
+            self._recent_perf['loss'].append(loss["loss"].detach().cpu().numpy())
         #print(loss["loss"])
         return loss["loss"]
     
@@ -81,6 +100,10 @@ class StepLightning(pl.LightningModule):
             print("validation step x",x[0])
             print("validation step candidates_p4",candidates_p4[0])
             print("validation step jet_choice",jet_choice[0])
+        if batch_idx==0:
+            # reset recent performance
+            for key in self._recent_perf:
+                self._recent_perf[key] = []
         return self.step(batch,batch_idx, "val")
 
     def configure_optimizers(self):
@@ -99,6 +122,40 @@ class StepLightning(pl.LightningModule):
         if N!=-1 and self.trainer.global_step >= N:
             lr_scale = 0.95
             pg["lr"] = self.lr * (lr_scale**(self.trainer.global_step // N))
+
+    def on_train_end(self):
+        # merge validation performance for all batches
+        perf = {}
+        for key in self._recent_perf:
+            if self._recent_perf[key][0].shape == (): # if scalar
+                perf[key] = np.array(self._recent_perf[key])
+            else:
+                perf[key] = np.concatenate(self._recent_perf[key], axis=-1)
+
+        # reconstructed mass plot
+        fig = plt.figure(figsize=(8,8))
+        ax = fig.add_subplot()
+        _ = ax.hist2d(perf['m0'], perf['m1'], bins=(50,50), range=((0,3000),(0,3000)))
+        _ = ax.set_xlabel("mass 0")
+        _ = ax.set_ylabel("mass 1")
+        self._log_plot(fig, "plot_val_reco_mass")
+
+        # MSE loss plot
+        fig = plt.figure(figsize=(8,8))
+        ax = fig.add_subplot()
+        logloss = np.log(perf['loss'])
+        _ = ax.hist(logloss, 
+                    bins=50, range=(-6,6),
+                    histtype='step',
+                    density=True,
+                    linewidth = 1.5,
+                    # linestyle=(linestyle),
+                    label=f"dataloader_idx_0")
+        _ = ax.legend(loc='upper left', bbox_to_anchor=(0, 1))
+        _ = ax.set_xlabel("Log(Loss)")
+        _ = ax.set_ylabel("Arb. unit")
+        self._log_plot(fig, "plot_val_logloss")
+        
     
     def loss(self, loss, xloss, candidates_p4):
 
@@ -116,3 +173,16 @@ class StepLightning(pl.LightningModule):
         # get total
         l['loss'] = sum(l.values())
         return l
+
+    def _log_plot(self, fig, name: str):
+        tb = self.logger.experiment # type: ignore
+        # Save the plot to a PNG in memory.
+        buf = io.BytesIO()
+        fig.savefig(buf, format='png')
+        # Closing the figure prevents it from being displayed directly inside
+        # the notebook.
+        plt.close(fig)
+        buf.seek(0)
+        im = Image.open(buf)
+        im = torchvision.transforms.ToTensor()(im)
+        tb.add_image(name, im)
