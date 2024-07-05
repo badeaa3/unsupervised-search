@@ -124,7 +124,7 @@ class StepLightning(pl.LightningModule):
             lr_scale = 0.95
             pg["lr"] = self.lr * (lr_scale**(self.trainer.global_step // N))
 
-    def on_train_end(self):
+    def on_validation_epoch_end(self):
         # merge validation performance for all batches
         perf = {}
         for key in self._recent_perf:
@@ -139,7 +139,7 @@ class StepLightning(pl.LightningModule):
         _ = ax.hist2d(perf['m0'], perf['m1'], bins=(50,50), range=((0,3000),(0,3000)))
         _ = ax.set_xlabel("mass 0")
         _ = ax.set_ylabel("mass 1")
-        self._log_plot(fig, "plot_val_reco_mass")
+        self._log_plot(fig, "plot_val_reco_mass", self.current_epoch)
 
         # MSE loss plot
         fig = plt.figure(figsize=(8,8))
@@ -155,7 +155,7 @@ class StepLightning(pl.LightningModule):
         _ = ax.legend(loc='upper left', bbox_to_anchor=(0, 1))
         _ = ax.set_xlabel("Log(Loss)")
         _ = ax.set_ylabel("Arb. unit")
-        self._log_plot(fig, "plot_val_logloss")
+        self._log_plot(fig, "plot_val_logloss", self.current_epoch)
         
     
     def loss(self, loss, xloss, candidates_p4):
@@ -180,7 +180,7 @@ class StepLightning(pl.LightningModule):
         l['loss'] = sum(l.values())
         return l
 
-    def _log_plot(self, fig, name: str):
+    def _log_plot(self, fig, name: str, step: int):
         tb = self.logger.experiment # type: ignore
         # Save the plot to a PNG in memory.
         buf = io.BytesIO()
@@ -191,4 +191,4 @@ class StepLightning(pl.LightningModule):
         buf.seek(0)
         im = Image.open(buf)
         im = torchvision.transforms.ToTensor()(im)
-        tb.add_image(name, im)
+        tb.add_image(name, im, step)
