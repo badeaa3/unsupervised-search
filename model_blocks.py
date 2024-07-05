@@ -174,7 +174,7 @@ class Encoder(nn.Module):
 
 
             # apply attention and remask, In -> Out : J,C -> J,E
-            x = self.obj_blocks[ib](Q=x, K=x, V=x, key_padding_mask=mask.bool(), attn_mask=wij)
+            x = self.obj_blocks[ib](Q=x, K=x, V=x, key_padding_mask=mask.float(), attn_mask=wij)
             x = x.masked_fill(mask.unsqueeze(-1).repeat(1,1,x.shape[-1]).bool(), 0)
 
             # candidate attention
