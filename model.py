@@ -2,6 +2,7 @@ import torch
 import pytorch_lightning as pl
 import model_blocks 
 from model_blocks import m2s_from_p4s
+from utils.functions import distance_corr
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -169,6 +170,11 @@ class StepLightning(pl.LightningModule):
             isr_m2 = m2s_from_p4s(isr)
             isr_pt2 = isr[:,1]**2+isr[:,2]**2
             l["ISR_energyT"]  =  torch.mean(torch.sqrt(isr_pt2+isr_m2))*self.loss_config["scale_ISR_loss"]
+        
+        if 'scale_corr_loss' in self.loss_config:
+            m2 = m2s_from_p4s(candidates_p4)
+            avgm = (m2[:,0].sqrt() + m2[:,1].sqrt()) / 2.0
+            l["corr"] = distance_corr(loss, avgm) * self.loss_config["scale_corr_loss"]
 
         # get total
         l['loss'] = sum(l.values())
